@@ -8,4 +8,5 @@ export interface ListUsersQuery {
 
 export interface UserRepository {
   list(query: ListUsersQuery): Promise<User[]>;
+  count(): Promise<number>;
 }

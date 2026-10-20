@@ -8,8 +8,10 @@ import {
   loadKeycloakAdminConfig,
   loadKeycloakConnectionConfig,
 } from "../lib/infrastructure/keycloak-admin.client.ts";
+import { CountUsersUseCase } from "../modules/users/application/count-users.usecase.ts";
 import { ListUsersUseCase } from "../modules/users/application/list-users.usecase.ts";
 import {
+  KeycloakUserCountError,
   KeycloakUserMappingError,
   KeycloakUserRepository,
 } from "../modules/users/infrastructure/keycloak-user.repository.ts";
@@ -22,10 +24,15 @@ async function run() {
   const { realmName } = loadKeycloakConnectionConfig(process.env);
   const repository = new KeycloakUserRepository(client, realmName);
   const listUsers = new ListUsersUseCase(repository);
+  const countUsers = new CountUsersUseCase(repository);
   const users = await listUsers.execute({ first: 0, max: 10 });
+  const count = await countUsers.execute();
 
   console.log(
     `Keycloak Users read-only integration passed (${users.length} record(s) returned).`,
+  );
+  console.log(
+    `Keycloak Users Count read-only integration passed (${count} total).`,
   );
 }
 
@@ -79,6 +86,11 @@ function reportFailure(error) {
     console.error(
       "Keycloak returned a user record that does not satisfy the Users domain contract.",
     );
+    return;
+  }
+
+  if (error instanceof KeycloakUserCountError) {
+    console.error("Keycloak returned an invalid Users count.");
     return;
   }
 

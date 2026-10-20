@@ -11,13 +11,20 @@ type KeycloakUserRepresentation = Awaited<
 >[number];
 
 type KeycloakUsersReader = {
-  readonly users: Pick<KcAdminClient["users"], "find">;
+  readonly users: Pick<KcAdminClient["users"], "count" | "find">;
 };
 
 export class KeycloakUserMappingError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "KeycloakUserMappingError";
+  }
+}
+
+export class KeycloakUserCountError extends Error {
+  constructor() {
+    super("Keycloak returned an invalid Users count.");
+    this.name = "KeycloakUserCountError";
   }
 }
 
@@ -39,6 +46,16 @@ export class KeycloakUserRepository implements UserRepository {
     });
 
     return users.map(mapUser);
+  }
+
+  async count(): Promise<number> {
+    const count = await this.client.users.count({ realm: this.realmName });
+
+    if (!Number.isSafeInteger(count) || count < 0) {
+      throw new KeycloakUserCountError();
+    }
+
+    return count;
   }
 }
 
