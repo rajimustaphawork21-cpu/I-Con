@@ -47,6 +47,7 @@ async function createIntegrationClient(environment) {
 
   const config = loadKeycloakConnectionConfig(environment);
   const client = new KcAdminClient(config);
+
   client.setAccessToken(accessToken);
 
   return client;
@@ -79,6 +80,7 @@ function getHttpStatus(error) {
 function reportFailure(error) {
   if (error instanceof KeycloakAdminConfigurationError) {
     console.error(`Keycloak integration configuration error: ${error.message}`);
+
     return;
   }
 
@@ -86,11 +88,13 @@ function reportFailure(error) {
     console.error(
       "Keycloak returned a user record that does not satisfy the Users domain contract.",
     );
+
     return;
   }
 
   if (error instanceof KeycloakUserCountError) {
     console.error("Keycloak returned an invalid Users count.");
+
     return;
   }
 
@@ -100,6 +104,7 @@ function reportFailure(error) {
     console.error(
       `Keycloak rejected the read-only Users request (HTTP ${status}). Check the configured service-account permissions.`,
     );
+
     return;
   }
 
@@ -107,6 +112,7 @@ function reportFailure(error) {
     console.error(
       "Keycloak could not find the configured Realm or Users endpoint (HTTP 404).",
     );
+
     return;
   }
 

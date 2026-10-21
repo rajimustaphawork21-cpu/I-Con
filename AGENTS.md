@@ -6,7 +6,9 @@
 
 - Project: existing `~/Desktop/keycloak-management` on Ubuntu; do not recreate it.
 - Product: a secure custom Keycloak administration UI, initially **one configurable Realm containing many application Clients**.
-- Architecture: **Modular DDD**, with `modules/<feature>/domain/`, `application/`, and `infrastructure/`. Preserve existing boundaries and shadcn Base UI/Nova dashboard.
+- Active application: the repository root is the Vuexy Next.js Starter Kit application. Run application, build, lint, tests and SDK checks from the repository root.
+- Architecture: **Modular DDD**, with `modules/<feature>/domain/`, `application/`, and `infrastructure/`. Preserve existing boundaries and the Vuexy MUI layout, navigation, theme and providers.
+- Reference UI: `resources/full-version/` is commercial Vuexy source for local reference only. Do not compile it, import it wholesale, publish it, or assume redistribution rights.
 - Source of truth: actual files/current runtime first; dated audit and screenshots are historical evidence, not a substitute for verification.
 
 Read in this order:
@@ -37,11 +39,11 @@ Do not infer that Postman success proves SDK or Dashboard success.
 - Authenticate and authorize the **human caller**; a service-account token is not a human session. Default-deny privileged operations.
 - No browser exposure of service tokens or secrets. Never echo, commit, screenshot or paste secrets, access tokens, `.env.local`, or real user data.
 - No Keycloak writes (including test-user creation, Roles, Clients, mappings) without explicit authorization for the specific operation and targets. Read-only testing is the current phase.
-- No multi-Realm implementation, architecture migration, new dependencies, mass rewrites, or git-history edits without authorization.
+- No multi-Realm implementation, further architecture migration, new dependencies, mass rewrites, or git-history edits without authorization.
 - Preserve uncommitted changes. Inspect `git status` before editing. Do not overwrite or delete user work.
 - Report **verified / historical / implemented / planned / blocked** accurately. Do not mark work done merely because a file or document exists.
 - Prefer small focused files; avoid extra folders or duplicated Service/Use Case logic when not justified.
 
 ## Current next action
 
-The [`Users Count DDD slice`](docs/implementation/users/users.md) is implemented and verified through the configured read-only service-account path. **Stop and wait for separate approval** to plan human OIDC/session security, platform RBAC and trusted server-side authorization. Do not create public Users APIs or connect the Dashboard before those controls are approved and ready; keep [`project-status.md`](docs/report/project-status.md) to a summary.
+The Vuexy root promotion and [`Users Count DDD slice`](docs/implementation/users/users.md) are implemented and verified from the repository root through the configured read-only service-account path. The former shadcn application is no longer present in the active working tree and remains recoverable from the verified Git snapshot. **Stop and wait for separate approval** to plan human OIDC/session security, platform RBAC and trusted server-side authorization. Do not create public Users APIs or connect Vuexy to live Users data before those controls are approved and ready; keep [`project-status.md`](docs/report/project-status.md) to a summary.

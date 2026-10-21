@@ -9,10 +9,12 @@ import {
 
 test("KeycloakUserRepository performs a scoped read and maps users", async () => {
   let receivedQuery;
+
   const client = {
     users: {
       async find(query) {
         receivedQuery = query;
+
         return [
           {
             id: "user-id",
@@ -47,10 +49,12 @@ test("KeycloakUserRepository performs a scoped read and maps users", async () =>
 
 test("KeycloakUserRepository omits an undefined search value", async () => {
   let receivedQuery;
+
   const client = {
     users: {
       async find(query) {
         receivedQuery = query;
+
         return [];
       },
     },
@@ -70,6 +74,7 @@ test("KeycloakUserRepository omits an undefined search value", async () => {
 
 test("KeycloakUserRepository rejects malformed records without exposing their data", async () => {
   const sensitiveValue = "personally-identifying-value";
+
   const client = {
     users: {
       async find() {
@@ -87,6 +92,7 @@ test("KeycloakUserRepository rejects malformed records without exposing their da
     (error) => {
       assert.ok(error instanceof KeycloakUserMappingError);
       assert.doesNotMatch(error.message, new RegExp(sensitiveValue));
+
       return true;
     },
   );
@@ -94,10 +100,12 @@ test("KeycloakUserRepository rejects malformed records without exposing their da
 
 test("KeycloakUserRepository counts users in the configured Realm", async () => {
   let receivedQuery;
+
   const client = {
     users: {
       async count(query) {
         receivedQuery = query;
+
         return 3;
       },
     },
@@ -142,6 +150,7 @@ for (const [description, invalidCount] of [
           error.message,
           new RegExp(escapeRegExp(String(invalidCount))),
         );
+
         return true;
       },
     );
@@ -150,6 +159,7 @@ for (const [description, invalidCount] of [
 
 test("KeycloakUserRepository propagates count infrastructure errors", async () => {
   const infrastructureError = new Error("infrastructure failure");
+
   const client = {
     users: {
       async count() {
@@ -162,6 +172,7 @@ test("KeycloakUserRepository propagates count infrastructure errors", async () =
     () => new KeycloakUserRepository(client, "configured-realm").count(),
     (error) => {
       assert.equal(error, infrastructureError);
+
       return true;
     },
   );

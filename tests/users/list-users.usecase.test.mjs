@@ -8,12 +8,15 @@ import {
 
 test("ListUsersUseCase validates, normalizes, and delegates the query", async () => {
   let receivedQuery;
+
   const expectedUsers = [
     { id: "user-id", username: "username", enabled: true },
   ];
+
   const repository = {
     async list(query) {
       receivedQuery = query;
+
       return expectedUsers;
     },
   };
@@ -34,9 +37,11 @@ test("ListUsersUseCase validates, normalizes, and delegates the query", async ()
 
 test("ListUsersUseCase removes an empty search value", async () => {
   let receivedQuery;
+
   const repository = {
     async list(query) {
       receivedQuery = query;
+
       return [];
     },
   };

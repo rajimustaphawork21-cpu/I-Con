@@ -5,9 +5,11 @@ import { CountUsersUseCase } from "../../modules/users/application/count-users.u
 
 test("CountUsersUseCase delegates to the repository and returns the count", async () => {
   let callCount = 0;
+
   const repository = {
     async count() {
       callCount += 1;
+
       return 3;
     },
   };
@@ -20,6 +22,7 @@ test("CountUsersUseCase delegates to the repository and returns the count", asyn
 
 test("CountUsersUseCase propagates repository errors", async () => {
   const repositoryError = new Error("repository unavailable");
+
   const useCase = new CountUsersUseCase({
     async count() {
       throw repositoryError;
@@ -28,6 +31,7 @@ test("CountUsersUseCase propagates repository errors", async () => {
 
   await assert.rejects(() => useCase.execute(), (error) => {
     assert.equal(error, repositoryError);
+
     return true;
   });
 });

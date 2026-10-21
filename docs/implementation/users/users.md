@@ -1,7 +1,7 @@
 # Users — Feature Documentation
 
-- **Current status:** **PARTIAL — read-only DDD List and Count verified; application integration blocked**
-- **Last reviewed:** 2026-10-20
+- **Current status:** **PARTIAL — read-only DDD List and Count verified in the root Vuexy application; application integration blocked**
+- **Last reviewed:** 2026-10-21
 - **Scope:** read-only Users work for one configured Realm
 
 This document owns Users-specific requirements, task progress and sanitized verification evidence. Shared request conventions remain in the [API document](../../api/api.md), durable boundaries in [architecture](../../architecture/architecture.md), feature navigation in the [implementation index](../implementation.md), and the concise project-wide state in [project status](../../report/project-status.md).
@@ -10,7 +10,7 @@ This document owns Users-specific requirements, task progress and sanitized veri
 
 The Users feature will let an authorized human administrator view, search, paginate and count Keycloak users in the application's one configured active Realm. The read-only List and Count DDD paths are implemented and verified against the configured local service-account connection.
 
-The current code is a read-only backend DDD slice. It is not a completed browser feature: there is no human login, session, platform RBAC, protected application API or live Users Dashboard. `company-dev` is the observed local test Realm, not a reusable application constant.
+The current code is a read-only backend DDD slice in the root Vuexy application. It is not a completed browser feature: there is no human login, session, platform RBAC, protected application API or live Users Dashboard. `company-dev` is the observed local test Realm, not a reusable application constant.
 
 User creation, updates, deletion, enable/disable operations, password management and Role assignment are outside the current slice. They remain unapproved Keycloak writes.
 
@@ -22,15 +22,15 @@ User creation, updates, deletion, enable/disable operations, password management
 | List/Search/Pagination use case | **IMPLEMENTED** | [`list-users.usecase.ts`](../../../modules/users/application/list-users.usecase.ts) validates and normalizes the query |
 | Count use case | **IMPLEMENTED** | [`count-users.usecase.ts`](../../../modules/users/application/count-users.usecase.ts) delegates through the Domain port |
 | Keycloak List/Count adapter | **IMPLEMENTED** | [`keycloak-user.repository.ts`](../../../modules/users/infrastructure/keycloak-user.repository.ts) uses the configured Realm, maps minimal fields and validates Count results |
-| Automated source tests | **VERIFIED** | 28/28 individual cases passed on 2026-10-20; the original 18 List/configuration cases remain passing |
+| Automated source tests | **VERIFIED** | 28/28 individual cases re-passed from the repository root on 2026-10-21; the original 18 List/configuration cases remain passing |
 | Service-account access token | **HISTORICAL PASS** | Postman returned HTTP 200 on 2026-10-19; token was not retained in documentation |
 | Empty Users list | **HISTORICAL PASS** | Postman returned HTTP 200 with JSON `[]` on 2026-10-19 |
 | Users read-only Postman suite | **USER-REPORTED PASS** | User reports the suite completed; request-by-request sanitized results were not supplied in this handoff |
-| Normal SDK client-credentials List | **VERIFIED** | Read-only integration returned 3 records on 2026-10-20 with the test-token override unset |
-| Normal SDK client-credentials Count | **VERIFIED** | Read-only integration returned a total of 3 on 2026-10-20 with the configured Realm |
+| Normal SDK client-credentials List | **VERIFIED** | Root read-only integration returned 3 records on 2026-10-20 with the test-token override unset |
+| Normal SDK client-credentials Count | **VERIFIED** | Root read-only integration returned a total of 3 on 2026-10-20 with the configured Realm |
 | Human login, session and platform RBAC | **NOT IMPLEMENTED** | No auth module, session flow or authorization policy exists |
 | Protected Users application API | **NOT IMPLEMENTED** | No Users `app/api/**` Route Handler exists |
-| Live Users Dashboard | **NOT IMPLEMENTED** | The existing Dashboard still uses demo data |
+| Live Users Dashboard | **NOT IMPLEMENTED** | Vuexy currently renders its Home/About template scaffold only |
 
 The live SDK results verify the configured machine credential's current read path only. They do not prove human authorization, protected application APIs or Dashboard integration.
 
@@ -46,7 +46,7 @@ The live SDK results verify the configured machine credential's current read pat
 - [x] Return a Users count through the Domain repository, `CountUsersUseCase`, and Keycloak infrastructure adapter.
 - [ ] Require an authenticated human session and server-side authorization before exposing Users through an application API.
 - [ ] Return safe DTOs and error responses without service tokens, secrets, raw SDK errors or unnecessary personal data.
-- [ ] Integrate real Users into the existing Dashboard only after the protected server API is ready.
+- [ ] Integrate real Users into the existing Vuexy application only after the protected server API is ready.
 
 ## 4. Keycloak REST API Endpoints
 
@@ -93,8 +93,8 @@ User Details and every Users mutation are outside this active feature slice. Lis
 | 2026-10-19 | `POST /realms/company-dev/protocol/openid-connect/token` | HTTP 200 | **HISTORICAL PASS** from a user-supplied screenshot; token redacted; does not prove endpoint authorization |
 | 2026-10-19 | `GET /admin/realms/company-dev/users?first=0&max=10` | HTTP 200, JSON `[]` | **HISTORICAL PASS** from a user-supplied screenshot; no populated behavior verified |
 | 2026-10-20 | Users read-only Postman suite | Completed successfully | **USER-REPORTED PASS**; request-by-request sanitized statuses and response shapes were not supplied in this handoff |
-| 2026-10-20 | Configured service-account SDK List | 3 records returned | **VERIFIED** by `env -u KEYCLOAK_TEST_ACCESS_TOKEN npm run test:keycloak`; no user records, token or secret printed |
-| 2026-10-20 | Configured service-account SDK Count | Total of 3 | **VERIFIED** by the same read-only run using the configured Realm |
+| 2026-10-20 | Root service-account SDK List | 3 records returned | **VERIFIED** from the repository root with `KEYCLOAK_TEST_ACCESS_TOKEN` unset; no user records, token or secret printed |
+| 2026-10-20 | Root service-account SDK Count | Total of 3 | **VERIFIED** by the same read-only run using the configured Realm |
 
 ### Test checklist
 
@@ -132,6 +132,8 @@ The Postman suite completion is user-reported; only the earlier HTTP 200 screens
 - [x] Preserve SDK/network errors for status-aware handling at the composition boundary; never substitute a false zero.
 - [x] Add focused use-case and adapter tests while preserving every previous test.
 - [x] Verify the normal SDK `client_credentials` path with `KEYCLOAK_TEST_ACCESS_TOKEN` explicitly unset; List and Count both returned 3.
+- [x] Migrate the complete slice, integration script and tests into Vuexy without changing DDD dependency direction.
+- [x] Promote the verified Vuexy slice to the repository root without duplicating implementations; the pre-promotion Git snapshot retains recovery material.
 
 ### Remaining plan — requires separate approval
 
@@ -145,10 +147,10 @@ The Postman suite completion is user-reported; only the earlier HTTP 200 screens
 - [ ] Compose Users use cases only in server-only code.
 - [ ] Add protected application endpoints for approved Users reads; do not accept an arbitrary browser-supplied Realm.
 - [ ] Return safe validation, unauthenticated, forbidden and infrastructure error responses.
-- [ ] Connect the existing shadcn Users table to the protected API with server pagination/search.
+- [ ] Add an authorized Users view within the existing Vuexy layout and connect it to the protected API with server pagination/search.
 - [ ] Add loading, populated, empty, error and forbidden states.
 - [ ] Add Count to the Dashboard only after the protected Count path is authorized and verified.
-- [ ] Remove demo data only from the relevant view after the real authorized flow works.
+- [ ] Replace template content only in the relevant Vuexy view after the real authorized flow works.
 
 All Phase 4 tasks are pending. The existing service account alone is not authorization to expose administrative data to a browser.
 
@@ -164,11 +166,12 @@ All Phase 4 tasks are pending. The existing service account alone is not authori
 ### Current verification results and remaining tests
 
 - [x] Add and run focused Count use-case and adapter tests, including invalid external results and infrastructure-error propagation.
-- [x] Run `npm test`: 4/4 isolated test files passed on 2026-10-20.
-- [x] Run `node --test --test-isolation=none tests/**/*.test.mjs`: 28/28 individual cases passed on 2026-10-20.
-- [x] Run `npm run typecheck`: passed on 2026-10-20.
-- [x] Run `npx eslint modules lib/infrastructure scripts tests`: passed on 2026-10-20.
-- [x] Verify the normal service-account SDK read-only path: List returned 3 records and Count returned 3.
+- [x] From the repository root, run the Node suite: 28/28 individual cases re-passed on 2026-10-21.
+- [x] From the repository root, run TypeScript no-emit: passed on 2026-10-20.
+- [x] From the repository root, run targeted Vuexy-configured lint across `modules`, `lib`, `scripts`, and `tests`: re-passed on 2026-10-21.
+- [x] Run the root Vuexy production build: Next.js 16.1.1 compiled, typechecked and generated the expected routes successfully on 2026-10-20.
+- [x] Run the root Vuexy dev/UI smoke test: `/` returned 308 to `/home`; `/home`, `/about`, and `/login` returned HTTP 200; instrumented Chrome rendered the themed Sidebar/header/footer/navigation with no console, runtime, response or image failures.
+- [x] Verify the root normal service-account SDK read-only path with the test-token override absent: List returned 3 records and Count returned 3.
 - [ ] Test protected API behavior for an authorized caller, unauthenticated 401, unauthorized 403, invalid query and sanitized infrastructure failure.
 - [ ] Test that no secrets, tokens, raw SDK errors or excessive personal data appear in responses or logs.
 - [ ] Run Dashboard end-to-end tests for populated, empty, search, pagination, loading, denied and error states.
@@ -185,8 +188,8 @@ Automated source tests do not prove current live Keycloak behavior, and Postman 
 | Human OIDC/session and platform RBAC are absent | No administrative data may be exposed through browser APIs |
 | No protected Users route or trusted-caller context exists | Dashboard integration remains blocked |
 | Audit design is absent | Future privileged mutations remain blocked |
-| Dashboard still imports demo JSON | There is no live Users UI to verify |
+| Vuexy is still a template scaffold | There is no live Users UI to verify |
 
 ## 12. Next Action
 
-The Users Count DDD slice is complete. Stop here and wait for separate approval to plan human OIDC sessions, platform RBAC and trusted server-side authorization. Those security boundaries must be designed and implemented before any protected Users application API or live Dashboard integration begins.
+The Vuexy root promotion and Users Count DDD slice are complete. Stop here and wait for separate approval to plan human OIDC sessions, platform RBAC and trusted server-side authorization. Those security boundaries must be designed and implemented before any protected Users application API or live Vuexy integration begins.

@@ -64,6 +64,7 @@ function mapUser(
   index: number,
 ): User {
   const id = requireNonEmptyString(representation.id, "id", index);
+
   const username = requireNonEmptyString(
     representation.username,
     "username",

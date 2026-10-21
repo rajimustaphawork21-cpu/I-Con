@@ -1,20 +1,20 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  experimental: {
-    agentFeedback: true,
-  },
-  cacheComponents: true,
-  partialPrefetching: true,
+  basePath: process.env.BASEPATH,
   turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
+    root: process.cwd()
   },
-};
+  redirects: async () => {
+    return [
+      {
+        source: '/',
+        destination: '/home',
+        permanent: true,
+        locale: false
+      }
+    ]
+  }
+}
 
-export default nextConfig;
+export default nextConfig

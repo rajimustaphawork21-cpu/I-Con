@@ -34,6 +34,7 @@ test("loadKeycloakAdminConfig reports missing names without values", () => {
       assert.ok(error instanceof KeycloakAdminConfigurationError);
       assert.match(error.message, /KEYCLOAK_ADMIN_CLIENT_SECRET/);
       assert.doesNotMatch(error.message, new RegExp(secretValue));
+
       return true;
     },
   );
@@ -41,6 +42,7 @@ test("loadKeycloakAdminConfig reports missing names without values", () => {
 
 test("loadKeycloakAdminConfig preserves the client secret exactly", () => {
   const clientSecret = "  exact-client-secret  ";
+
   const config = loadKeycloakAdminConfig({
     KEYCLOAK_URL: "http://localhost:8080",
     KEYCLOAK_REALM: "configured-realm",
@@ -64,6 +66,7 @@ test("loadKeycloakConnectionConfig rejects an invalid URL without echoing it", (
     (error) => {
       assert.ok(error instanceof KeycloakAdminConfigurationError);
       assert.doesNotMatch(error.message, new RegExp(invalidValue));
+
       return true;
     },
   );
