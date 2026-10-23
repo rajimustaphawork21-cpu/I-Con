@@ -19,7 +19,7 @@ Every feature follows the same gates. A later phase must not be treated as appro
 | Feature | Current status | Feature documentation | Next gate |
 | --- | --- | --- | --- |
 | Users | **PARTIAL — read-only List/Count DDD verified in the root Vuexy app** | [Users](users/users.md) | Wait for approval to plan human OIDC/session, RBAC and a protected Users API |
-| Authentication and Sessions | **BLOCKED — planning required** | No dedicated feature document yet | Approve human OIDC/session scope before planning browser integration |
+| Authentication and Sessions | **IMPLEMENTED — Phase 1 Human Authentication & Session Management verified** | [Authentication](authentication/authentication.md) | Proceed to Phase 2: Platform Admin Roles and RBAC planning |
 | Platform Admin Roles and RBAC | **BLOCKED — planning required** | No dedicated feature document yet | Decide role representation, delegation and bootstrap safeguards |
 | Clients | **PLANNED** | No dedicated feature document yet | Begin read-only endpoint and permission planning after the Users gate |
 | Client Roles | **PLANNED** | No dedicated feature document yet | Resolve Client UUID workflow and plan read-only verification |

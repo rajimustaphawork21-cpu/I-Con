@@ -11,19 +11,20 @@
 | Active application | **VERIFIED** 2026-10-20 | Vuexy Starter Kit 5.0.1 runs directly from the repository root; no nested active application remains |
 | Vuexy layout/runtime | **VERIFIED PASS** 2026-10-20 | `/` returned 308 to `/home`; Home/About/Login returned 200; Chrome rendered Sidebar/header/footer/theme/navigation with no console, runtime, response or image failures |
 | DDD Users List/Count paths | **IMPLEMENTED; VERIFIED** | Root `modules/users`, separate Use Cases and SDK adapter; see [Users](../implementation/users/users.md) |
-| 28 individual automated cases | **VERIFIED PASS** 2026-10-21 | Root rerun; original 18 plus focused Count coverage |
-| TypeScript | **VERIFIED PASS** 2026-10-20 | Root no-emit check and production build typecheck |
-| Targeted lint | **VERIFIED PASS** 2026-10-21 | Root `modules`, `lib`, `scripts`, and `tests` under Vuexy config |
-| Full root lint | **VERIFIED PASS** 2026-10-20 | Vuexy source plus migrated backend; Full Version excluded |
-| Production build | **VERIFIED PASS** 2026-10-20 | Root Next.js 16.1.1 Turbopack build; five listed dynamic routes including not-found handling |
-| Dependency install | **VERIFIED PASS** 2026-10-20 | Root pnpm 10.18.3 frozen lockfile; exact Keycloak client 26.8.0 installed |
+| 57 individual automated cases | **VERIFIED PASS** 2026-10-23 | Root rerun; 28 Users/SDK + 29 Auth Phase 1 tests |
+| TypeScript | **VERIFIED PASS** 2026-10-23 | Root no-emit check and production build typecheck |
+| Targeted lint | **VERIFIED PASS** 2026-10-23 | Root `modules`, `lib`, `scripts`, and `tests` under Vuexy config |
+| Full root lint | **VERIFIED PASS** 2026-10-23 | Vuexy source plus migrated backend; Full Version excluded |
+| Production build | **VERIFIED PASS** 2026-10-23 | Root Next.js 16.4.2 Turbopack build; routes include auth and proxy |
+| Dependency install | **VERIFIED PASS** 2026-10-23 | Root pnpm 10.18.3 frozen lockfile; audit passed with 0 vulnerabilities |
 | Keycloak server | VERIFIED in audit | `keycloak` container, version 26.8.0, `start-dev`, port 8080 |
 | `company-dev` discovery | VERIFIED in audit | public OIDC discovery 200 |
 | Postman client-credentials token | HISTORICAL PASS | 2026-10-19 screenshot, 200 |
 | Postman Users list | HISTORICAL PASS | 2026-10-19 screenshot, 200 `[]` |
 | Users read-only Postman suite | USER-REPORTED PASS | User states the suite completed; granular sanitized outcomes were not supplied in this handoff |
 | SDK with configured `management-service` credentials | **VERIFIED** 2026-10-20 | Root script, test-token override unset; List returned 3 and Count returned 3 |
-| Human OIDC, session, platform RBAC | **NOT IMPLEMENTED** | Vuexy `/login` is template presentation only; no Keycloak auth/session policy |
+| Human OIDC & session management | **IMPLEMENTED; VERIFIED** 2026-10-23 | Phase 1 Auth.js v4 OIDC PKCE, encrypted JWT sessions, 30m/8h timeouts, dual logout |
+| Platform RBAC | **NOT IMPLEMENTED** | Phase 2 planning required |
 | Protected application API | **NOT IMPLEMENTED** | no protected Users Route Handler |
 | Users live Vuexy integration | **NOT IMPLEMENTED** | template Home/About content only |
 | Clients, Roles, Access, Groups, Audit | PLANNED | no implementation modules |
