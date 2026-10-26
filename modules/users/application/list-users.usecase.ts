@@ -3,9 +3,9 @@ import type {
   UserRepository,
 } from "../domain/user.repository";
 import type { User } from "../domain/user.type";
+import { normalizeUsersSearch } from "./user-query.validation";
 
 const MAX_PAGE_SIZE = 100;
-const MAX_SEARCH_LENGTH = 256;
 const MAX_FIRST_RESULT = 2_147_483_647;
 
 export class InvalidListUsersQueryError extends Error {
@@ -50,25 +50,12 @@ function normalizeQuery(query: ListUsersQuery): ListUsersQuery {
     );
   }
 
-  if (query.search === undefined) {
-    return { first: query.first, max: query.max };
-  }
+  const search = normalizeUsersSearch(
+    query.search,
+    message => new InvalidListUsersQueryError(message),
+  );
 
-  if (typeof query.search !== "string") {
-    throw new InvalidListUsersQueryError("The search value must be a string.");
-  }
-
-  const search = query.search.trim();
-
-  if (search.length === 0) {
-    return { first: query.first, max: query.max };
-  }
-
-  if (search.length > MAX_SEARCH_LENGTH) {
-    throw new InvalidListUsersQueryError(
-      `The search value must not exceed ${MAX_SEARCH_LENGTH} characters.`,
-    );
-  }
-
-  return { first: query.first, max: query.max, search };
+  return search === undefined
+    ? { first: query.first, max: query.max }
+    : { first: query.first, max: query.max, search };
 }

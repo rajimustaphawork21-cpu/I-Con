@@ -1,6 +1,7 @@
 import type KcAdminClient from "@keycloak/keycloak-admin-client";
 
 import type {
+  CountUsersQuery,
   ListUsersQuery,
   UserRepository,
 } from "../domain/user.repository";
@@ -48,8 +49,11 @@ export class KeycloakUserRepository implements UserRepository {
     return users.map(mapUser);
   }
 
-  async count(): Promise<number> {
-    const count = await this.client.users.count({ realm: this.realmName });
+  async count(query: CountUsersQuery): Promise<number> {
+    const count = await this.client.users.count({
+      ...(query.search === undefined ? {} : { search: query.search }),
+      realm: this.realmName,
+    });
 
     if (!Number.isSafeInteger(count) || count < 0) {
       throw new KeycloakUserCountError();

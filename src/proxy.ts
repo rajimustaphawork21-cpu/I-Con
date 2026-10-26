@@ -31,5 +31,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api/auth|login|_next/static|_next/image|images|favicon.ico).*)']
+  // Users APIs own their JSON 401/403 responses; page requests keep redirects.
+  matcher: ['/((?!api/auth|api/users|login|_next/static|_next/image|images|favicon.ico).*)']
 }

@@ -1,7 +1,7 @@
 # Authentication and Sessions — Feature Documentation
 
 - **Current status:** **IMPLEMENTED — Phase 1 Human Authentication & Session Management verified in root Vuexy app**
-- **Last reviewed:** 2026-10-23
+- **Last reviewed:** 2026-10-26
 - **Scope:** Human authentication, session lifecycle, and logout via Keycloak OIDC client `management-web` for the configured Realm
 
 This document owns authentication-specific requirements, design implementation, and verification evidence. Shared boundaries remain in [architecture](../../architecture/architecture.md), feature index in [implementation index](../implementation.md), and project-wide summary in [project status](../../report/project-status.md).
@@ -75,16 +75,14 @@ src/
 
 | Verification Step | Result | Notes |
 | --- | --- | --- |
-| Automated Unit Tests | **PASS (57/57)** | 28 existing Users/SDK tests + 29 focused Auth tests (`session-policy`, `auth-config`, `logout-request`) |
+| Original Phase 1 automated suite | **PASS (57/57)** | 28 existing Users/SDK tests + 29 focused Auth tests (`session-policy`, `auth-config`, `logout-request`) |
+| Phase 2 full regression suite | **PASS (113/113)** | All 29 Phase 1 Auth tests remain passing on 2026-10-26 |
 | TypeScript Check | **PASS (`tsc --noEmit`)** | Zero type errors across all modules, layouts, and route handlers |
 | ESLint Check | **PASS (`eslint`)** | Conforms to Vuexy style guide and import rules |
 | Production Build | **PASS (`next build`)** | Turbopack compiled in 4.6s, typecheck 23.6s, static pages generated |
 | Security Audit | **PASS (`pnpm audit --prod`)** | 0 vulnerabilities found |
 | Git Hygiene | **PASS (`git diff --check`)** | Clean whitespace check |
 
-## 5. Next Steps
+## 5. Current integration boundary
 
-Authentication Phase 1 is complete. Application data routes remain blocked until Phase 2:
-1. Plan Platform Admin Roles and RBAC.
-2. Design server-side permission checks for Keycloak Admin API endpoints.
-3. Protect Users API routes before connecting Vuexy Dashboard components to live data.
+Authentication Phase 1 remains unchanged. Phase 2 reads the trusted `sub` directly from the encrypted cookie for server authorization while preserving the minimal public Session contract. Users APIs own JSON 401 responses; normal protected page navigation continues to redirect to `/login`. Login, activity expiry and both logout behaviors were not changed.

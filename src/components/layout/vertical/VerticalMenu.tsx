@@ -71,6 +71,9 @@ const VerticalMenu = ({ scrollMenu }: Props) => {
         <MenuItem href='/home' icon={<i className='tabler-smart-home' />}>
           Home
         </MenuItem>
+        <MenuItem href='/users' icon={<i className='tabler-users' />}>
+          Users
+        </MenuItem>
         <MenuItem href='/about' icon={<i className='tabler-info-circle' />}>
           About
         </MenuItem>

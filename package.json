@@ -12,7 +12,7 @@
     "lint:fix": "ESLINT_USE_FLAT_CONFIG=false eslint . --ext .js,.jsx,.ts,.tsx --fix",
     "lint:keycloak": "ESLINT_USE_FLAT_CONFIG=false eslint modules lib scripts tests --ext .js,.mjs,.ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-isolation=none tests/**/*.test.mjs",
+    "test": "node --import ./scripts/register-typescript-test-hooks.mjs --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test --test-isolation=none tests/**/*.test.mjs",
     "test:keycloak": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --env-file-if-exists=.env.local scripts/test-keycloak.mjs",
     "format": "prettier --write \"src/**/*.{js,jsx,ts,tsx}\"",
     "build:icons": "tsx src/assets/iconify-icons/bundle-icons-css.ts",

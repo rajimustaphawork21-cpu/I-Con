@@ -1,6 +1,6 @@
 # Implementation — Feature Index
 
-**Last reviewed:** 2026-10-21. The repository root is the single active Vuexy Starter Kit application; the former shadcn application is absent from the active tree and recoverable from the verified Git snapshot. This document is the concise implementation index. Detailed requirements, task checklists and sanitized evidence belong in a feature document once that feature enters active planning. Project-wide architecture, shared API conventions and current summary evidence remain in the [architecture](../architecture/architecture.md), [API](../api/api.md) and [project status](../report/project-status.md) documents.
+**Last reviewed:** 2026-10-26. The repository root is the single active Vuexy Starter Kit application. This document is the concise implementation index. Detailed requirements, task checklists and sanitized evidence belong in the owning feature document.
 
 ## Development workflow
 
@@ -18,15 +18,15 @@ Every feature follows the same gates. A later phase must not be treated as appro
 
 | Feature | Current status | Feature documentation | Next gate |
 | --- | --- | --- | --- |
-| Users | **PARTIAL — read-only List/Count DDD verified in the root Vuexy app** | [Users](users/users.md) | Wait for approval to plan human OIDC/session, RBAC and a protected Users API |
-| Authentication and Sessions | **IMPLEMENTED — Phase 1 Human Authentication & Session Management verified** | [Authentication](authentication/authentication.md) | Proceed to Phase 2: Platform Admin Roles and RBAC planning |
-| Platform Admin Roles and RBAC | **BLOCKED — planning required** | No dedicated feature document yet | Decide role representation, delegation and bootstrap safeguards |
+| Users | **IMPLEMENTED — protected read-only List/Count APIs and Vuexy page; automated verification passed** | [Users](users/users.md) | Perform optional live browser/API verification; writes require a new approved phase |
+| Authentication and Sessions | **IMPLEMENTED — Phase 1 verified and regression-tested** | [Authentication](authentication/authentication.md) | Preserve current login/session/logout behavior |
+| Platform Admin Roles and RBAC | **IMPLEMENTED for Users Read only** | [Access/RBAC](access/access.md) | Define a new action/resource matrix before any additional feature or write |
 | Clients | **PLANNED** | No dedicated feature document yet | Begin read-only endpoint and permission planning after the Users gate |
 | Client Roles | **PLANNED** | No dedicated feature document yet | Resolve Client UUID workflow and plan read-only verification |
-| Access and Role Mappings | **BLOCKED** | No dedicated feature document yet | Plan direct/effective reads; writes additionally require RBAC, audit and explicit approval |
-| Dashboard Integration | **BLOCKED — Vuexy scaffold only** | No dedicated feature document yet | Wait for human authentication, server authorization and protected APIs |
+| Access and Role Mappings | **PARTIAL — current caller's direct management-web roles are read only for authorization** | [Access/RBAC](access/access.md) | General role-mapping UI/writes require separate planning, audit and approval |
+| Dashboard Integration | **IMPLEMENTED for Users Read** | [Users](users/users.md) | Expand only after each feature's security gate |
 
-Only Users has entered active feature-document tracking. Do not create placeholder documents for the other rows.
+Only implemented or actively evidenced features receive dedicated records; do not create placeholder documents for future rows.
 
 ## Deferred scope
 
@@ -46,4 +46,4 @@ Only Users has entered active feature-document tracking. Do not create placehold
 - **BLOCKED:** a required security, evidence or approval gate is missing.
 - **DEFERRED:** intentionally outside the current implementation sequence.
 
-The Vuexy root promotion and [Users Count DDD slice](users/users.md) are complete. Stop before another feature or browser/API integration; human authentication and server-side authorization require a separately approved plan.
+Phase 2 Users Read and its scoped RBAC are complete in source and automated verification. Stop before Users mutations, general role management or another administrative feature; each requires its own plan, Postman evidence and explicit approval.

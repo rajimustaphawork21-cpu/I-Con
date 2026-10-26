@@ -89,7 +89,7 @@ test("KeycloakUserRepository rejects malformed records without exposing their da
         first: 0,
         max: 10,
       }),
-    (error) => {
+    error => {
       assert.ok(error instanceof KeycloakUserMappingError);
       assert.doesNotMatch(error.message, new RegExp(sensitiveValue));
 
@@ -114,7 +114,7 @@ test("KeycloakUserRepository counts users in the configured Realm", async () => 
   const result = await new KeycloakUserRepository(
     client,
     "configured-realm",
-  ).count();
+  ).count({});
 
   assert.deepEqual(receivedQuery, { realm: "configured-realm" });
   assert.equal(result, 3);
@@ -138,9 +138,8 @@ for (const [description, invalidCount] of [
     };
 
     await assert.rejects(
-      () =>
-        new KeycloakUserRepository(client, "configured-realm").count(),
-      (error) => {
+      () => new KeycloakUserRepository(client, "configured-realm").count({}),
+      error => {
         assert.ok(error instanceof KeycloakUserCountError);
         assert.equal(
           error.message,
@@ -169,13 +168,37 @@ test("KeycloakUserRepository propagates count infrastructure errors", async () =
   };
 
   await assert.rejects(
-    () => new KeycloakUserRepository(client, "configured-realm").count(),
-    (error) => {
+    () => new KeycloakUserRepository(client, "configured-realm").count({}),
+    error => {
       assert.equal(error, infrastructureError);
 
       return true;
     },
   );
+});
+
+test("KeycloakUserRepository passes search to filtered Count", async () => {
+  let receivedQuery;
+  const client = {
+    users: {
+      async count(query) {
+        receivedQuery = query;
+
+        return 2;
+      },
+    },
+  };
+
+  const result = await new KeycloakUserRepository(
+    client,
+    "configured-realm",
+  ).count({ search: "test" });
+
+  assert.equal(result, 2);
+  assert.deepEqual(receivedQuery, {
+    search: "test",
+    realm: "configured-realm",
+  });
 });
 
 function escapeRegExp(value) {

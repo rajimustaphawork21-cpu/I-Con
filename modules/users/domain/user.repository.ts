@@ -6,7 +6,11 @@ export interface ListUsersQuery {
   readonly search?: string;
 }
 
+export interface CountUsersQuery {
+  readonly search?: string;
+}
+
 export interface UserRepository {
   list(query: ListUsersQuery): Promise<User[]>;
-  count(): Promise<number>;
+  count(query: CountUsersQuery): Promise<number>;
 }

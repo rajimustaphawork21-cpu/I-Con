@@ -1,6 +1,6 @@
 # API & Postman — Shared Conventions
 
-**Last reviewed:** 2026-10-20. This document owns shared Keycloak REST conventions, Postman mechanics, endpoint references and safe evidence rules. Feature-specific checklists and results live in the relevant feature document, currently [Users](../implementation/users/users.md). `company-dev` is an observed dev target, not a reusable code constant. References: [Keycloak Admin REST API](https://www.keycloak.org/docs-api/latest/rest-api/index.html), [Keycloak documentation](https://www.keycloak.org/documentation).
+**Last reviewed:** 2026-10-26. This document owns shared Keycloak REST conventions, application API contracts, Postman mechanics and safe evidence rules. Feature-specific evidence lives in [Users](../implementation/users/users.md) and [Access/RBAC](../implementation/access/access.md). `company-dev` is a development value, not a reusable code constant.
 
 ## How to use Postman during a testing-only phase
 
@@ -52,7 +52,7 @@ Set Postman **Authorization → Bearer Token → `{{accessToken}}`**. If the res
 Each active feature document owns its Postman checklist, expected outcomes and sanitized actual results. Do not duplicate a feature's progress matrix here.
 
 - [Users Postman tests and results](../implementation/users/users.md#7-phase-2--postman-tests-and-results)
-- No other feature currently has an active feature document or approved Postman evidence record.
+- [Access/RBAC implementation and compatibility record](../implementation/access/access.md)
 
 ## Sanitized evidence format
 
@@ -85,7 +85,7 @@ All paths below are **Keycloak** endpoints, not application `/api` routes. Subst
 | Client Details | GET | `/admin/realms/{realm}/clients/{clientUuid}` | Future Clients feature planning |
 | Client Roles | GET | `/admin/realms/{realm}/clients/{clientUuid}/roles` | Future Client Roles feature planning |
 | Client Role Details | GET | `/admin/realms/{realm}/clients/{clientUuid}/roles/{roleName}` | Future Client Roles feature planning |
-| Direct User-Client mappings | GET | `/admin/realms/{realm}/users/{userId}/role-mappings/clients/{clientUuid}` | Future Access feature planning |
+| Direct User-Client mappings | GET | `/admin/realms/{realm}/users/{userId}/role-mappings/clients/{clientUuid}` | Current caller authorization only; see [Access/RBAC](../implementation/access/access.md) |
 | Effective User-Client mappings | GET | `/admin/realms/{realm}/users/{userId}/role-mappings/clients/{clientUuid}/composite` | Future Access feature planning |
 | Add direct Client Roles | POST | `/admin/realms/{realm}/users/{userId}/role-mappings/clients/{clientUuid}` | **Write unapproved** |
 | Remove direct Client Roles | DELETE | `/admin/realms/{realm}/users/{userId}/role-mappings/clients/{clientUuid}` | **Write unapproved** |
@@ -112,8 +112,52 @@ Each feature document must record its historically observed permissions, the per
 
 An API's observed status always beats guesses in this table. Never document a request as tested merely because its endpoint is listed.
 
+## Protected application API contracts
+
+These Next.js routes are not Keycloak Admin REST endpoints. Both use the configured Realm and authenticate the human subject from the encrypted server session.
+
+### `GET /api/users`
+
+Query parameters:
+
+| Name | Default | Validation |
+| --- | --- | --- |
+| `first` | `0` | integer from 0 through 2,147,483,647 |
+| `max` | `10` | integer from 1 through 100 |
+| `search` | omitted | trimmed; blank omitted; maximum 256 characters |
+
+HTTP 200 response:
+
+```json
+{
+  "users": [
+    { "id": "...", "username": "...", "enabled": true, "email": "optional" }
+  ],
+  "pagination": { "first": 0, "max": 10 }
+}
+```
+
+### `GET /api/users/count`
+
+Accepts the same optional normalized `search` value and returns filtered Count:
+
+```json
+{ "count": 3 }
+```
+
+### Shared response behavior
+
+| HTTP | Meaning |
+| --- | --- |
+| 400 | Unsupported, duplicate or out-of-bound query parameter |
+| 401 | Missing, malformed or expired human session |
+| 403 | Authenticated subject is missing, disabled or lacks a direct allowed `management-web` role |
+| 503 | Safe fail-closed response for configuration, role-resolution or Keycloak read failure |
+
+Every response uses `Cache-Control: no-store`. Success DTOs allowlist only minimal User fields or Count; errors never include raw SDK messages, roles, credentials or tokens.
+
 ## Application integration boundaries
 
-Keycloak Admin REST paths are not application `/api` routes. Browser code must never call the Admin REST API with service credentials or receive a service token. After a feature completes its Postman and implementation-plan gates, a protected server-side route may authenticate and authorize the human caller, invoke an Application use case, and return a minimized DTO with safe error mapping.
+Keycloak Admin REST paths are not application `/api` routes. Browser code never calls the Admin REST API with service credentials or receives a service token. The implemented Users routes authenticate and authorize the human caller, invoke authorized Application use cases and return minimized DTOs with safe error mapping.
 
 The [Users feature document](../implementation/users/users.md) owns the current integration state. Project-wide implementation summaries belong in [project status](../report/project-status.md); actual feature evidence remains in the feature document.
