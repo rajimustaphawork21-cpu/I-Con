@@ -21,12 +21,6 @@ import Divider from '@mui/material/Divider'
 import MenuItem from '@mui/material/MenuItem'
 import Button from '@mui/material/Button'
 
-// Third-party Imports
-import { signOut, useSession } from 'next-auth/react'
-
-// Component Imports
-import KeycloakLogoutButton from '@components/auth/KeycloakLogoutButton'
-
 // Hook Imports
 import { useSettings } from '@core/hooks/useSettings'
 
@@ -49,11 +43,8 @@ const UserDropdown = () => {
 
   // Hooks
   const router = useRouter()
-  const { data: session } = useSession()
 
   const { settings } = useSettings()
-
-  const displayName = session?.user?.name ?? ''
 
   const handleDropdownOpen = () => {
     !open ? setOpen(true) : setOpen(false)
@@ -71,9 +62,9 @@ const UserDropdown = () => {
     setOpen(false)
   }
 
-  // Sign out of this application only; the Keycloak SSO session is left untouched.
   const handleUserLogout = async () => {
-    await signOut({ callbackUrl: '/login' })
+    // Redirect to login page
+    router.push('/login')
   }
 
   return (
@@ -87,7 +78,7 @@ const UserDropdown = () => {
       >
         <Avatar
           ref={anchorRef}
-          alt={displayName}
+          alt='John Doe'
           src='/images/avatars/1.png'
           onClick={handleDropdownOpen}
           className='cursor-pointer bs-[38px] is-[38px]'
@@ -112,11 +103,12 @@ const UserDropdown = () => {
               <ClickAwayListener onClickAway={e => handleDropdownClose(e as MouseEvent | TouchEvent)}>
                 <MenuList>
                   <div className='flex items-center plb-2 pli-6 gap-2' tabIndex={-1}>
-                    <Avatar alt={displayName} src='/images/avatars/1.png' />
+                    <Avatar alt='John Doe' src='/images/avatars/1.png' />
                     <div className='flex items-start flex-col'>
                       <Typography className='font-medium' color='text.primary'>
-                        {displayName}
+                        John Doe
                       </Typography>
+                      <Typography variant='caption'>admin@vuexy.com</Typography>
                     </div>
                   </div>
                   <Divider className='mlb-1' />
@@ -136,7 +128,7 @@ const UserDropdown = () => {
                     <i className='tabler-help-circle' />
                     <Typography color='text.primary'>FAQ</Typography>
                   </MenuItem>
-                  <div className='flex flex-col gap-2 plb-2 pli-3'>
+                  <div className='flex items-center plb-2 pli-3'>
                     <Button
                       fullWidth
                       variant='contained'
@@ -146,9 +138,8 @@ const UserDropdown = () => {
                       onClick={handleUserLogout}
                       sx={{ '& .MuiButton-endIcon': { marginInlineStart: 1.5 } }}
                     >
-                      Sign out of this app
+                      Logout
                     </Button>
-                    <KeycloakLogoutButton />
                   </div>
                 </MenuList>
               </ClickAwayListener>

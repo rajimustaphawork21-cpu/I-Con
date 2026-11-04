@@ -3,16 +3,22 @@
 // React Imports
 import { useState } from 'react'
 
+// Next Imports
+import { useRouter } from 'next/navigation'
+
 // MUI Imports
 import useMediaQuery from '@mui/material/useMediaQuery'
 import { styled, useTheme } from '@mui/material/styles'
 import Typography from '@mui/material/Typography'
+import IconButton from '@mui/material/IconButton'
+import InputAdornment from '@mui/material/InputAdornment'
+import Checkbox from '@mui/material/Checkbox'
 import Button from '@mui/material/Button'
-import Alert from '@mui/material/Alert'
+import FormControlLabel from '@mui/material/FormControlLabel'
+import Divider from '@mui/material/Divider'
 
 // Third-party Imports
 import classnames from 'classnames'
-import { signIn } from 'next-auth/react'
 
 // Type Imports
 import type { SystemMode } from '@core/types'
@@ -20,6 +26,7 @@ import type { SystemMode } from '@core/types'
 // Component Imports
 import Link from '@components/Link'
 import Logo from '@components/layout/shared/Logo'
+import CustomTextField from '@core/components/mui/TextField'
 
 // Config Imports
 import themeConfig from '@configs/themeConfig'
@@ -52,14 +59,9 @@ const MaskImg = styled('img')({
   zIndex: -1
 })
 
-type Props = {
-  mode: SystemMode
-  hasError?: boolean
-}
-
-const LoginV2 = ({ mode, hasError = false }: Props) => {
+const LoginV2 = ({ mode }: { mode: SystemMode }) => {
   // States
-  const [isRedirecting, setIsRedirecting] = useState(false)
+  const [isPasswordShown, setIsPasswordShown] = useState(false)
 
   // Vars
   const darkImg = '/images/pages/auth-mask-dark.png'
@@ -70,6 +72,7 @@ const LoginV2 = ({ mode, hasError = false }: Props) => {
   const borderedLightIllustration = '/images/illustrations/auth/v2-login-light-border.png'
 
   // Hooks
+  const router = useRouter()
   const { settings } = useSettings()
   const theme = useTheme()
   const hidden = useMediaQuery(theme.breakpoints.down('md'))
@@ -83,11 +86,7 @@ const LoginV2 = ({ mode, hasError = false }: Props) => {
     borderedDarkIllustration
   )
 
-  // The callback URL is a fixed same-origin path; Keycloak collects all credentials.
-  const handleContinue = () => {
-    setIsRedirecting(true)
-    void signIn('keycloak', { callbackUrl: '/home' })
-  }
+  const handleClickShowPassword = () => setIsPasswordShown(show => !show)
 
   return (
     <div className='flex bs-full justify-center'>
@@ -115,12 +114,67 @@ const LoginV2 = ({ mode, hasError = false }: Props) => {
         <div className='flex flex-col gap-6 is-full sm:is-auto md:is-full sm:max-is-[400px] md:max-is-[unset] mbs-11 sm:mbs-14 md:mbs-0'>
           <div className='flex flex-col gap-1'>
             <Typography variant='h4'>{`Welcome to ${themeConfig.templateName}! 👋🏻`}</Typography>
-            <Typography>Sign in with your organization account to continue</Typography>
+            <Typography>Please sign-in to your account and start the adventure</Typography>
           </div>
-          {hasError && <Alert severity='error'>Sign-in could not be completed. Please try again.</Alert>}
-          <Button fullWidth variant='contained' disabled={isRedirecting} onClick={handleContinue}>
-            Continue with Keycloak
-          </Button>
+          <form
+            noValidate
+            autoComplete='off'
+            onSubmit={e => {
+              e.preventDefault()
+              router.push('/')
+            }}
+            className='flex flex-col gap-5'
+          >
+            <CustomTextField autoFocus fullWidth label='Email or Username' placeholder='Enter your email or username' />
+            <CustomTextField
+              fullWidth
+              label='Password'
+              placeholder='············'
+              id='outlined-adornment-password'
+              type={isPasswordShown ? 'text' : 'password'}
+              slotProps={{
+                input: {
+                  endAdornment: (
+                    <InputAdornment position='end'>
+                      <IconButton edge='end' onClick={handleClickShowPassword} onMouseDown={e => e.preventDefault()}>
+                        <i className={isPasswordShown ? 'tabler-eye-off' : 'tabler-eye'} />
+                      </IconButton>
+                    </InputAdornment>
+                  )
+                }
+              }}
+            />
+            <div className='flex justify-between items-center gap-x-3 gap-y-1 flex-wrap'>
+              <FormControlLabel control={<Checkbox />} label='Remember me' />
+              <Typography className='text-end' color='primary.main' component={Link}>
+                Forgot password?
+              </Typography>
+            </div>
+            <Button fullWidth variant='contained' type='submit'>
+              Login
+            </Button>
+            <div className='flex justify-center items-center flex-wrap gap-2'>
+              <Typography>New on our platform?</Typography>
+              <Typography component={Link} color='primary.main'>
+                Create an account
+              </Typography>
+            </div>
+            <Divider className='gap-2 text-textPrimary'>or</Divider>
+            <div className='flex justify-center items-center gap-1.5'>
+              <IconButton className='text-facebook' size='small'>
+                <i className='tabler-brand-facebook-filled' />
+              </IconButton>
+              <IconButton className='text-twitter' size='small'>
+                <i className='tabler-brand-twitter-filled' />
+              </IconButton>
+              <IconButton className='text-textPrimary' size='small'>
+                <i className='tabler-brand-github-filled' />
+              </IconButton>
+              <IconButton className='text-error' size='small'>
+                <i className='tabler-brand-google-filled' />
+              </IconButton>
+            </div>
+          </form>
         </div>
       </div>
     </div>
