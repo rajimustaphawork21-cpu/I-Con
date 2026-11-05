@@ -3,6 +3,9 @@
 // Third-party Imports
 import classnames from 'classnames'
 
+// Type Imports
+import type { NavbarUser } from '@components/layout/shared/UserDropdown'
+
 // Component Imports
 import NavToggle from './NavToggle'
 import Logo from '@components/layout/shared/Logo'
@@ -15,7 +18,7 @@ import useHorizontalNav from '@menu/hooks/useHorizontalNav'
 // Util Imports
 import { horizontalLayoutClasses } from '@layouts/utils/layoutClasses'
 
-const NavbarContent = () => {
+const NavbarContent = ({ user }: { user: NavbarUser }) => {
   // Hooks
   const { isBreakpointReached } = useHorizontalNav()
 
@@ -30,7 +33,7 @@ const NavbarContent = () => {
       </div>
       <div className='flex items-center'>
         <ModeDropdown />
-        <UserDropdown />
+        <UserDropdown user={user} />
       </div>
     </div>
   )

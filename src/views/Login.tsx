@@ -1,68 +1,116 @@
 'use client'
 
-// React Imports
-import { useState } from 'react'
-
-// Next Imports
-import { useRouter } from 'next/navigation'
-
 // MUI Imports
-import useMediaQuery from '@mui/material/useMediaQuery'
-import { styled, useTheme } from '@mui/material/styles'
-import Typography from '@mui/material/Typography'
-import IconButton from '@mui/material/IconButton'
-import InputAdornment from '@mui/material/InputAdornment'
-import Checkbox from '@mui/material/Checkbox'
+import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
-import FormControlLabel from '@mui/material/FormControlLabel'
-import Divider from '@mui/material/Divider'
-
-// Third-party Imports
-import classnames from 'classnames'
+import Paper from '@mui/material/Paper'
+import Typography from '@mui/material/Typography'
+import { styled } from '@mui/material/styles'
 
 // Type Imports
 import type { SystemMode } from '@core/types'
 
 // Component Imports
-import Link from '@components/Link'
-import Logo from '@components/layout/shared/Logo'
-import CustomTextField from '@core/components/mui/TextField'
-
-// Config Imports
-import themeConfig from '@configs/themeConfig'
+import VuexyLogo from '@core/svg/Logo'
 
 // Hook Imports
 import { useImageVariant } from '@core/hooks/useImageVariant'
-import { useSettings } from '@core/hooks/useSettings'
+
+// Server Action Imports
+import {
+  signInWithKeycloak,
+  signOutWithKeycloak,
+} from '@/libs/auth/actions'
+
+type Props = {
+  mode: SystemMode
+
+  // Set only for an authenticated session WITHOUT the required realm role (authorized users are redirected).
+  user: { name: string | null; email: string | null } | null
+  authError?: string
+  logoutIncomplete?: boolean
+}
 
 // Styled Custom Components
 const LoginIllustration = styled('img')(({ theme }) => ({
-  zIndex: 2,
+  position: 'relative',
+  zIndex: 1,
   blockSize: 'auto',
-  maxBlockSize: 680,
-  maxInlineSize: '100%',
-  margin: theme.spacing(12),
+  maxBlockSize: 560,
+  maxInlineSize: 'min(78%, 640px)',
+  filter: 'grayscale(1)',
+  opacity: 0.78,
+  transition: 'opacity 200ms ease-in-out',
   [theme.breakpoints.down(1536)]: {
-    maxBlockSize: 550
+    maxBlockSize: 500
   },
   [theme.breakpoints.down('lg')]: {
-    maxBlockSize: 450
+    maxBlockSize: 400
   }
 }))
 
 const MaskImg = styled('img')({
   blockSize: 'auto',
-  maxBlockSize: 355,
+  maxBlockSize: 320,
   inlineSize: '100%',
   position: 'absolute',
   insetBlockEnd: 0,
-  zIndex: -1
+  filter: 'grayscale(1)',
+  opacity: 0.22
 })
 
-const LoginV2 = ({ mode }: { mode: SystemMode }) => {
-  // States
-  const [isPasswordShown, setIsPasswordShown] = useState(false)
+const VisualPanel = styled('section')({
+  position: 'relative',
+  isolation: 'isolate',
+  overflow: 'hidden',
+  background:
+    'linear-gradient(145deg, var(--mui-palette-background-default) 0%, var(--mui-palette-background-paper) 100%)',
+  '&::before': {
+    content: '""',
+    position: 'absolute',
+    inset: 0,
+    zIndex: 0,
+    opacity: 0.32,
+    backgroundImage: 'radial-gradient(var(--mui-palette-divider) 1px, transparent 1px)',
+    backgroundSize: '24px 24px',
+    maskImage: 'linear-gradient(to bottom, black, transparent 82%)'
+  }
+})
 
+const LoginCard = styled(Paper)(({ theme }) => ({
+  boxSizing: 'border-box',
+  inlineSize: '100%',
+  maxInlineSize: 430,
+  padding: theme.spacing(8),
+  border: '1px solid var(--mui-palette-divider)',
+  borderRadius: theme.shape.borderRadius * 2,
+  boxShadow: theme.shadows[8],
+  [theme.breakpoints.down('sm')]: {
+    padding: theme.spacing(6)
+  }
+}))
+
+const Brand = () => (
+  <Box className='flex items-center gap-3' aria-label='I-Con'>
+    <Box
+      className='flex items-center justify-center rounded-md'
+      sx={{
+        inlineSize: 36,
+        blockSize: 36,
+        color: 'text.primary',
+        bgcolor: 'action.hover',
+        border: theme => `1px solid ${theme.palette.divider}`
+      }}
+    >
+      <VuexyLogo fontSize='1.25rem' aria-hidden='true' />
+    </Box>
+    <Typography variant='h5' component='span' className='font-semibold tracking-tight'>
+      I-Con
+    </Typography>
+  </Box>
+)
+
+const LoginV2 = ({ mode, user, authError, logoutIncomplete }: Props) => {
   // Vars
   const darkImg = '/images/pages/auth-mask-dark.png'
   const lightImg = '/images/pages/auth-mask-light.png'
@@ -72,10 +120,6 @@ const LoginV2 = ({ mode }: { mode: SystemMode }) => {
   const borderedLightIllustration = '/images/illustrations/auth/v2-login-light-border.png'
 
   // Hooks
-  const router = useRouter()
-  const { settings } = useSettings()
-  const theme = useTheme()
-  const hidden = useMediaQuery(theme.breakpoints.down('md'))
   const authBackground = useImageVariant(mode, lightImg, darkImg)
 
   const characterIllustration = useImageVariant(
@@ -86,98 +130,141 @@ const LoginV2 = ({ mode }: { mode: SystemMode }) => {
     borderedDarkIllustration
   )
 
-  const handleClickShowPassword = () => setIsPasswordShown(show => !show)
-
   return (
-    <div className='flex bs-full justify-center'>
-      <div
-        className={classnames(
-          'flex bs-full items-center justify-center flex-1 min-bs-[100dvh] relative p-6 max-md:hidden',
-          {
-            'border-ie': settings.skin === 'bordered'
-          }
-        )}
+    <Box className='flex min-bs-[100dvh]' sx={{ bgcolor: 'background.default' }}>
+      <VisualPanel className='hidden md:flex flex-1 flex-col justify-between p-10 lg:p-14 border-ie'>
+        <Box className='relative z-[1]'>
+          <Brand />
+        </Box>
+
+        <Box className='flex flex-1 items-center justify-center'>
+          <LoginIllustration src={characterIllustration} alt='' aria-hidden='true' />
+          <MaskImg src={authBackground} alt='' aria-hidden='true' />
+        </Box>
+
+        <Typography variant='body2' color='text.secondary' className='relative z-[1]'>
+          Portail professionnel I-Con
+        </Typography>
+      </VisualPanel>
+
+      <Box
+        component='main'
+        className='flex min-bs-[100dvh] is-full items-center justify-center p-6 sm:p-10 md:is-[520px] lg:is-[560px]'
+        sx={{ bgcolor: 'background.paper' }}
       >
-        <LoginIllustration src={characterIllustration} alt='character-illustration' />
-        {!hidden && (
-          <MaskImg
-            alt='mask'
-            src={authBackground}
-            className={classnames({ 'scale-x-[-1]': theme.direction === 'rtl' })}
-          />
-        )}
-      </div>
-      <div className='flex justify-center items-center bs-full bg-backgroundPaper !min-is-full p-6 md:!min-is-[unset] md:p-12 md:is-[480px]'>
-        <Link className='absolute block-start-5 sm:block-start-[33px] inline-start-6 sm:inline-start-[38px]'>
-          <Logo />
-        </Link>
-        <div className='flex flex-col gap-6 is-full sm:is-auto md:is-full sm:max-is-[400px] md:max-is-[unset] mbs-11 sm:mbs-14 md:mbs-0'>
-          <div className='flex flex-col gap-1'>
-            <Typography variant='h4'>{`Welcome to ${themeConfig.templateName}! 👋🏻`}</Typography>
-            <Typography>Please sign-in to your account and start the adventure</Typography>
-          </div>
-          <form
-            noValidate
-            autoComplete='off'
-            onSubmit={e => {
-              e.preventDefault()
-              router.push('/')
-            }}
-            className='flex flex-col gap-5'
-          >
-            <CustomTextField autoFocus fullWidth label='Email or Username' placeholder='Enter your email or username' />
-            <CustomTextField
-              fullWidth
-              label='Password'
-              placeholder='············'
-              id='outlined-adornment-password'
-              type={isPasswordShown ? 'text' : 'password'}
-              slotProps={{
-                input: {
-                  endAdornment: (
-                    <InputAdornment position='end'>
-                      <IconButton edge='end' onClick={handleClickShowPassword} onMouseDown={e => e.preventDefault()}>
-                        <i className={isPasswordShown ? 'tabler-eye-off' : 'tabler-eye'} />
-                      </IconButton>
-                    </InputAdornment>
-                  )
-                }
-              }}
-            />
-            <div className='flex justify-between items-center gap-x-3 gap-y-1 flex-wrap'>
-              <FormControlLabel control={<Checkbox />} label='Remember me' />
-              <Typography className='text-end' color='primary.main' component={Link}>
-                Forgot password?
-              </Typography>
-            </div>
-            <Button fullWidth variant='contained' type='submit'>
-              Login
-            </Button>
-            <div className='flex justify-center items-center flex-wrap gap-2'>
-              <Typography>New on our platform?</Typography>
-              <Typography component={Link} color='primary.main'>
-                Create an account
-              </Typography>
-            </div>
-            <Divider className='gap-2 text-textPrimary'>or</Divider>
-            <div className='flex justify-center items-center gap-1.5'>
-              <IconButton className='text-facebook' size='small'>
-                <i className='tabler-brand-facebook-filled' />
-              </IconButton>
-              <IconButton className='text-twitter' size='small'>
-                <i className='tabler-brand-twitter-filled' />
-              </IconButton>
-              <IconButton className='text-textPrimary' size='small'>
-                <i className='tabler-brand-github-filled' />
-              </IconButton>
-              <IconButton className='text-error' size='small'>
-                <i className='tabler-brand-google-filled' />
-              </IconButton>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
+        <Box className='flex is-full max-is-[430px] flex-col gap-6'>
+          <Box className='md:hidden'>
+            <Brand />
+          </Box>
+
+          <LoginCard elevation={0}>
+            <Box className='flex flex-col gap-6'>
+              <Box className='flex flex-col gap-2'>
+                <Typography variant='h4' component='h1' className='font-semibold'>
+                  Bienvenue sur I-Con
+                </Typography>
+                <Typography color='text.secondary'>Connectez-vous avec votre compte professionnel.</Typography>
+              </Box>
+
+              {user ? (
+                <>
+                  <Box
+                    role='alert'
+                    className='flex items-start gap-3 rounded-md p-4'
+                    sx={{ bgcolor: 'action.hover', border: theme => `1px solid ${theme.palette.divider}` }}
+                  >
+                    <i className='tabler-lock-access mbs-0.5 text-warning' aria-hidden='true' />
+                    <Box className='flex flex-col gap-1'>
+                      <Typography variant='body2' className='font-medium' color='text.primary'>
+                        Accès non autorisé
+                      </Typography>
+                      <Typography variant='body2' color='text.secondary'>
+                        Connecté en tant que {user.name ?? user.email ?? 'utilisateur'}
+                        {user.name && user.email ? ` (${user.email})` : ''}. Votre compte ne dispose pas du profil
+                        requis pour accéder à I-Con.
+                      </Typography>
+                      <Typography variant='body2' color='text.secondary'>
+                        Si votre profil a été modifié récemment, déconnectez-vous puis reconnectez-vous.
+                      </Typography>
+                    </Box>
+                  </Box>
+
+                  <form action={signOutWithKeycloak}>
+                    <Button
+                      fullWidth
+                      type='submit'
+                      size='large'
+                      variant='outlined'
+                      color='secondary'
+                      startIcon={<i className='tabler-logout' aria-hidden='true' />}
+                      sx={{ minBlockSize: 48 }}
+                    >
+                      Se déconnecter
+                    </Button>
+                  </form>
+                </>
+              ) : (
+                <>
+                  {logoutIncomplete ? (
+                    <Box
+                      role='alert'
+                      className='flex items-start gap-3 rounded-md p-4'
+                      sx={{ bgcolor: 'action.hover', border: theme => `1px solid ${theme.palette.divider}` }}
+                    >
+                      <i className='tabler-alert-triangle mbs-0.5 text-warning' aria-hidden='true' />
+                      <Typography variant='body2' color='text.secondary'>
+                        Votre session I-Con a été fermée, mais la déconnexion SSO Keycloak n’a pas pu être confirmée.
+                        Avant de vous reconnecter, vérifiez ou fermez votre session Keycloak.
+                      </Typography>
+                    </Box>
+                  ) : null}
+
+                  {authError ? (
+                    <Box
+                      role='alert'
+                      className='flex items-start gap-3 rounded-md p-4'
+                      sx={{ bgcolor: 'action.hover', border: theme => `1px solid ${theme.palette.divider}` }}
+                    >
+                      <i className='tabler-alert-circle mbs-0.5 text-error' aria-hidden='true' />
+                      <Typography variant='body2' color='text.secondary'>
+                        La connexion a échoué. Veuillez réessayer ou contacter votre administrateur.
+                      </Typography>
+                    </Box>
+                  ) : null}
+
+                  <form action={signInWithKeycloak}>
+                    <Button
+                      fullWidth
+                      type='submit'
+                      size='large'
+                      variant='contained'
+                      startIcon={<i className='tabler-lock' aria-hidden='true' />}
+                      sx={{ minBlockSize: 48 }}
+                    >
+                      Se connecter avec SSO
+                    </Button>
+                  </form>
+
+                  <Box
+                    className='flex items-start gap-3 rounded-md p-4'
+                    sx={{ bgcolor: 'action.hover', border: theme => `1px solid ${theme.palette.divider}` }}
+                  >
+                    <i className='tabler-info-circle mbs-0.5 text-textSecondary' aria-hidden='true' />
+                    <Typography variant='body2' color='text.secondary'>
+                      Vous serez redirigé vers le service d’authentification sécurisé I-Con.
+                    </Typography>
+                  </Box>
+                </>
+              )}
+            </Box>
+          </LoginCard>
+
+          <Typography variant='caption' color='text.secondary' className='text-center'>
+            Accès réservé aux utilisateurs autorisés.
+          </Typography>
+        </Box>
+      </Box>
+    </Box>
   )
 }
 

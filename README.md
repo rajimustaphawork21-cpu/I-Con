@@ -14,6 +14,55 @@ pnpm dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Auth.js deployment origin
+
+For local development and local production testing, set:
+
+```env
+AUTH_URL=http://localhost:3000
+```
+
+For deployment, replace it with the exact public HTTPS origin, for example
+`AUTH_URL=https://icon.example.com`. Register the matching Keycloak redirect URI:
+`https://icon.example.com/api/auth/callback/keycloak`.
+
+When Next.js is behind a reverse proxy, set `AUTH_TRUST_HOST=true` only if all of the following are true:
+
+- the proxy overwrites `Host`, `X-Forwarded-Host`, and `X-Forwarded-Proto`;
+- clients cannot inject or append their own forwarding headers;
+- the Next.js process is reachable only through that proxy.
+
+Terminate TLS at the trusted proxy (or at Next.js), forward `X-Forwarded-Proto: https`, and use HTTPS for
+the production Keycloak issuer and JWKS endpoint. Do not set `AUTH_TRUST_HOST=true` on a directly exposed
+Next.js server with untrusted forwarding headers.
+
+## Keycloak realm-role claim
+
+Authorization requires the Realm Role `portal-ops-n1` in `realm_access.roles`. The preferred source is the
+validated ID token. In Keycloak, review the realm-role protocol mapper used by client `icon-bff` (commonly
+the built-in `roles` client scope) and enable **Add to ID token** and **Add to access token** with token claim
+name `realm_access.roles`. No Keycloak configuration is changed by this repository.
+
+If the ID-token mapper is absent, I-Con verifies the access-token RS256 signature against the realm JWKS,
+then validates issuer, expiry, and `azp=icon-bff` before accepting the realm-role claim.
+
+## Keycloak SSO logout
+
+I-Con uses Keycloak's discovered OIDC `end_session_endpoint` and sends an `id_token_hint`, the client ID,
+and an exact post-logout return URI. The ID token is retained only inside the encrypted, HTTP-only Auth.js
+session cookie and is never returned by `/api/auth/session` or passed to a client component.
+
+In Keycloak Admin Console, open realm `I-Con`, then **Clients** > `icon-bff` > **Settings** >
+**Logout settings**. Add this exact **Valid post logout redirect URI** for local production testing:
+
+```text
+http://localhost:3000/login
+```
+
+Do not use a wildcard. For a future deployment, add the exact HTTPS equivalent (for example,
+`https://icon.example.com/login`) matching `AUTH_URL`. Keep the reverse-proxy requirements above in place.
+This repository does not modify the Keycloak realm automatically.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
