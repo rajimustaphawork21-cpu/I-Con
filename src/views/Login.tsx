@@ -25,7 +25,7 @@ import {
 type Props = {
   mode: SystemMode
 
-  // Set only for an authenticated session WITHOUT the required realm role (authorized users are redirected).
+  // Set only for an authenticated session without an authorized Client Role (authorized users are redirected).
   user: { name: string | null; email: string | null } | null
   authError?: string
   logoutIncomplete?: boolean

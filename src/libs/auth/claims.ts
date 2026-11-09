@@ -1,33 +1,57 @@
-/** Pure, unit-testable helpers for Keycloak realm-role and display claims. */
+/** Pure, unit-testable helpers for Keycloak client-role and display claims. */
 
-// Realm Role (not a Client Role) required to access the I-Con portal.
-export const PORTAL_REALM_ROLE = 'portal-ops-n1'
+export const PORTAL_CLIENT_ID = 'icon-bff'
+export const PORTAL_CLIENT_ROLES = ['OPS-N1', 'ADM-APP', 'AUD', 'ADM-CONSOLE'] as const
 
-// Display labels for known realm roles.
-const PROFILE_LABELS: Readonly<Record<string, string>> = {
-  [PORTAL_REALM_ROLE]: 'OPS-N1 — Support'
+export type PortalClientRole = (typeof PORTAL_CLIENT_ROLES)[number]
+
+const PROFILE_LABELS: Readonly<Record<PortalClientRole, string>> = {
+  'OPS-N1': 'OPS-N1 — Support',
+  'ADM-APP': 'ADM-APP — Administration applicative',
+  AUD: 'AUD — Audit',
+  'ADM-CONSOLE': 'ADM-CONSOLE — Administration console'
 }
 
 export type Claims = Record<string, unknown>
 
-// Reads Keycloak's `realm_access.roles` claim. Returns null when the claim is absent or malformed.
-export const readRealmRoles = (claims: Claims | null | undefined): string[] | null => {
-  const realmAccess = claims?.realm_access
+// Reads exact roles from `resource_access[clientId].roles`. Missing and malformed claims fail closed.
+export const readClientRoles = (
+  claims: Claims | null | undefined,
+  clientId: string | null | undefined
+): string[] | null => {
+  if (!clientId) return null
 
-  if (!realmAccess || typeof realmAccess !== 'object') return null
+  const resourceAccess = claims?.resource_access
 
-  const roles = (realmAccess as { roles?: unknown }).roles
+  if (!resourceAccess || typeof resourceAccess !== 'object' || Array.isArray(resourceAccess)) return null
 
-  if (!Array.isArray(roles)) return null
+  const clientAccess = (resourceAccess as Record<string, unknown>)[clientId]
 
-  return roles.filter((role): role is string => typeof role === 'string')
+  if (!clientAccess || typeof clientAccess !== 'object' || Array.isArray(clientAccess)) return null
+
+  const roles = (clientAccess as { roles?: unknown }).roles
+
+  if (!Array.isArray(roles) || !roles.every((role): role is string => typeof role === 'string')) return null
+
+  return [...new Set(roles)]
 }
 
-export const hasRealmRole = (roles: readonly string[] | null | undefined, role: string): boolean =>
+export const hasClientRole = (roles: readonly string[] | null | undefined, role: string): boolean =>
   Array.isArray(roles) && roles.includes(role)
 
+export const hasAnyClientRole = (
+  roles: readonly string[] | null | undefined,
+  allowedRoles: readonly string[]
+): boolean => allowedRoles.length > 0 && allowedRoles.some(role => hasClientRole(roles, role))
+
+export const hasPortalAccess = (roles: readonly string[] | null | undefined): boolean =>
+  hasAnyClientRole(roles, PORTAL_CLIENT_ROLES)
+
+export const getPortalClientRoles = (roles: readonly string[] | null | undefined): PortalClientRole[] =>
+  PORTAL_CLIENT_ROLES.filter(role => hasClientRole(roles, role))
+
 export const getProfileLabel = (roles: readonly string[] | null | undefined): string | null => {
-  const role = Object.keys(PROFILE_LABELS).find(known => hasRealmRole(roles, known))
+  const role = PORTAL_CLIENT_ROLES.find(known => hasClientRole(roles, known))
 
   return role ? PROFILE_LABELS[role] : null
 }

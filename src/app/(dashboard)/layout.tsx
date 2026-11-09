@@ -30,7 +30,7 @@ const Layout = async (props: ChildrenType) => {
 
   // Type guard to ensure lang is a valid Locale
 
-  // Server-side guard (no session -> /login, missing realm role -> 403). Pages re-check on their own.
+  // Server-side guard (no session -> /login, no authorized icon-bff Client Role -> 403).
   const session = await requirePortalAccess()
 
   // Vars
@@ -41,7 +41,7 @@ const Layout = async (props: ChildrenType) => {
   const navbarUser = {
     name: session.user.name ?? session.user.email ?? 'Utilisateur',
     email: session.user.email ?? null,
-    profileLabel: getProfileLabel(session.realmRoles)
+    profileLabel: getProfileLabel(session.clientRoles)
   }
 
   return (

@@ -7,20 +7,25 @@ import { forbidden, redirect } from 'next/navigation'
 import { auth } from '@/auth'
 
 // Lib Imports
-import { PORTAL_REALM_ROLE, hasRealmRole } from '@/libs/auth/claims'
+import { PORTAL_CLIENT_ROLES, hasAnyClientRole } from '@/libs/auth/claims'
+import type { PortalClientRole } from '@/libs/auth/claims'
 
 /**
- * Server-side guard for protected I-Con pages (default deny).
- * - No session                      -> redirect to /login
- * - Session without portal-ops-n1   -> 403 (app/forbidden.tsx)
+ * Server-side role guard for protected I-Con pages (default deny).
+ * - No session                         -> redirect to /login
+ * - No exact allowed icon-bff role     -> 403 (app/forbidden.tsx)
+ *
+ * Feature routes can pass the role subset allowed by their CDCF/CDCT policy.
  */
-export const requirePortalAccess = async () => {
+export const requireAnyPortalRole = async (allowedRoles: readonly PortalClientRole[]) => {
   const session = await auth()
 
   if (!session?.user) redirect('/login')
 
-  if (!hasRealmRole(session.realmRoles, PORTAL_REALM_ROLE)) forbidden()
+  if (!hasAnyClientRole(session.clientRoles, allowedRoles)) forbidden()
 
   return session
 }
+
+export const requirePortalAccess = () => requireAnyPortalRole(PORTAL_CLIENT_ROLES)
 

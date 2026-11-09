@@ -6,7 +6,7 @@ import Forbidden from '@views/Forbidden'
 // Util Imports
 import { getServerMode, getSystemMode } from '@core/utils/serverHelpers'
 
-// Rendered with HTTP 403 when a server component calls `forbidden()` (missing realm role).
+// Rendered with HTTP 403 when a server component calls `forbidden()` (missing allowed Client Role).
 const ForbiddenPage = async () => {
   // Vars
   const direction = 'ltr'

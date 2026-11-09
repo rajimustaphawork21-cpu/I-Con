@@ -15,11 +15,11 @@ export const metadata: Metadata = {
 }
 
 const WelcomePage = async () => {
-  // Server-side authorization: session + realm role portal-ops-n1 (default deny).
+  // Server-side authorization: session + an authorized icon-bff Client Role (default deny).
   const session = await requirePortalAccess()
 
   const firstName = getFirstName(session.user)
-  const profileLabel = getProfileLabel(session.realmRoles)
+  const profileLabel = getProfileLabel(session.clientRoles)
 
   return (
     <Card>

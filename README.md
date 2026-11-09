@@ -36,15 +36,17 @@ Terminate TLS at the trusted proxy (or at Next.js), forward `X-Forwarded-Proto: 
 the production Keycloak issuer and JWKS endpoint. Do not set `AUTH_TRUST_HOST=true` on a directly exposed
 Next.js server with untrusted forwarding headers.
 
-## Keycloak realm-role claim
+## Keycloak client-role claims
 
-Authorization requires the Realm Role `portal-ops-n1` in `realm_access.roles`. The preferred source is the
-validated ID token. In Keycloak, review the realm-role protocol mapper used by client `icon-bff` (commonly
-the built-in `roles` client scope) and enable **Add to ID token** and **Add to access token** with token claim
-name `realm_access.roles`. No Keycloak configuration is changed by this repository.
+Portal authorization uses the exact Client Roles `OPS-N1`, `ADM-APP`, `AUD`, and `ADM-CONSOLE` from
+`resource_access["icon-bff"].roles`. Realm Roles, roles belonging to other Clients, unknown roles, and
+browser-provided values do not grant access. An authenticated user without one of these roles receives 403.
 
-If the ID-token mapper is absent, I-Con verifies the access-token RS256 signature against the realm JWKS,
-then validates issuer, expiry, and `azp=icon-bff` before accepting the realm-role claim.
+The preferred source is the ID token already validated by Auth.js. If that claim is absent, I-Con verifies
+the access-token RS256 signature against the Realm JWKS and validates its issuer, subject, expiry, and
+`azp=icon-bff` before reading the same Client Role claim. The subject must match the validated ID token.
+Provider tokens are never returned in the Auth.js session. No Keycloak configuration is changed by this
+repository.
 
 ## Keycloak SSO logout
 
@@ -62,6 +64,28 @@ http://localhost:3000/login
 Do not use a wildcard. For a future deployment, add the exact HTTPS equivalent (for example,
 `https://icon.example.com/login`) matching `AUTH_URL`. Keep the reverse-proxy requirements above in place.
 This repository does not modify the Keycloak realm automatically.
+
+## Read-only Keycloak user directory
+
+The server-only user-directory adapter uses a dedicated confidential Keycloak client. For local development,
+create `icon-directory-reader` in the `I-Con` realm with client authentication and service accounts enabled.
+Disable browser flows for this client and grant its service account only the read roles needed for the Admin REST
+user endpoints: `realm-management` client roles `query-users` and `view-users`. Do not grant `manage-users`,
+`realm-admin`, or other write-capable roles.
+
+Set these server-only variables in `.env` or `.env.local`:
+
+```env
+ICON_KEYCLOAK_ADMIN_URL=http://localhost:8080
+ICON_KEYCLOAK_REALM=I-Con
+ICON_KEYCLOAK_DIRECTORY_CLIENT_ID=icon-directory-reader
+ICON_KEYCLOAK_DIRECTORY_CLIENT_SECRET=replace-with-the-directory-reader-client-secret
+```
+
+Never prefix these variables with `NEXT_PUBLIC_`. The service-account token is requested and consumed only by the
+BFF. Directory access also requires an explicit trusted visibility scope: either a realm-wide scope approved by a
+future server-side scope resolver, or a concrete set of approved Keycloak account IDs. The adapter never infers
+realm-wide access from a missing or malformed scope.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

@@ -16,7 +16,7 @@ import {
 import type { OidcLogoutConfiguration } from '@/libs/auth/oidc-logout'
 
 // Starts the OIDC Authorization Code + PKCE flow and redirects the browser to Keycloak.
-// After the callback, /welcome performs the server-side realm role check.
+// After the callback, /welcome performs the server-side Client Role check.
 export const signInWithKeycloak = async () => {
   await signIn('keycloak', { redirectTo: '/welcome' })
 }

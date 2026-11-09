@@ -4,10 +4,10 @@ import 'server-only'
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 
 // Lib Imports
-import { readRealmRoles } from '@/libs/auth/claims'
+import { readClientRoles } from '@/libs/auth/claims'
 import type { Claims } from '@/libs/auth/claims'
 
-export type RealmRoleSource = 'id_token' | 'access_token' | 'none'
+export type ClientRoleSource = 'id_token' | 'access_token' | 'none'
 
 const ACCESS_TOKEN_ALGORITHMS = ['RS256'] as const
 const remoteJwksByIssuer = new Map<string, ReturnType<typeof createRemoteJWKSet>>()
@@ -43,44 +43,52 @@ const getRemoteJwks = (issuer: string) => {
   return remoteJwks
 }
 
-const verifyAccessTokenRoles = async (input: { accessToken: string; issuer: string; clientId: string }) => {
+const verifyAccessTokenRoles = async (input: {
+  accessToken: string
+  issuer: string
+  clientId: string
+  expectedSubject: string
+}) => {
   const { payload } = await jwtVerify(input.accessToken, getRemoteJwks(input.issuer), {
     issuer: input.issuer,
     algorithms: [...ACCESS_TOKEN_ALGORITHMS],
-    requiredClaims: ['iss', 'exp', 'azp']
+    requiredClaims: ['iss', 'sub', 'exp', 'azp']
   })
 
-  // Keycloak's `azp` identifies the OAuth client to which the access token was issued.
-  if (payload.azp !== input.clientId) return null
+  // Bind the access token to both the configured OAuth client and the validated OIDC identity.
+  if (payload.azp !== input.clientId || payload.sub !== input.expectedSubject) return null
 
-  return readRealmRoles(payload as Claims)
+  return readClientRoles(payload as Claims, input.clientId)
 }
 
 /**
- * Extracts Keycloak realm roles once, at sign-in, and defaults to no roles on every failure.
+ * Extracts Keycloak client roles once, at sign-in, and defaults to no roles on every failure.
  *
- * 1. Prefer Auth.js-validated ID-token claims (`realm_access.roles`).
+ * 1. Prefer Auth.js-validated ID-token claims (`resource_access[clientId].roles`).
  * 2. If the ID-token mapper is absent, verify the access-token signature against Keycloak JWKS,
- *    then validate issuer, expiry, authorized party, and the same realm-role claim.
+ *    then validate issuer, subject, expiry, authorized party, and the same client-role claim.
  *
  * Provider tokens never enter the Auth.js session and browser-supplied role values are never read.
  */
-export const extractRealmRoles = async (input: {
+export const extractClientRoles = async (input: {
   idTokenClaims: Claims | null | undefined
   accessToken: string | undefined
   issuer: string | undefined
   clientId: string | undefined
-}): Promise<{ roles: string[]; source: RealmRoleSource }> => {
-  const fromIdToken = readRealmRoles(input.idTokenClaims)
+}): Promise<{ roles: string[]; source: ClientRoleSource }> => {
+  const fromIdToken = readClientRoles(input.idTokenClaims, input.clientId)
 
   if (fromIdToken !== null) return { roles: fromIdToken, source: 'id_token' }
 
-  if (input.accessToken && input.issuer && input.clientId) {
+  const expectedSubject = input.idTokenClaims?.sub
+
+  if (input.accessToken && input.issuer && input.clientId && typeof expectedSubject === 'string') {
     try {
       const fromAccessToken = await verifyAccessTokenRoles({
         accessToken: input.accessToken,
         issuer: input.issuer,
-        clientId: input.clientId
+        clientId: input.clientId,
+        expectedSubject
       })
 
       if (fromAccessToken !== null) return { roles: fromAccessToken, source: 'access_token' }

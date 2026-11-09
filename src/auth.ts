@@ -4,21 +4,21 @@ import type { DefaultSession } from 'next-auth'
 import Keycloak from 'next-auth/providers/keycloak'
 
 // Lib Imports
-import { PORTAL_REALM_ROLE } from '@/libs/auth/claims'
+import { PORTAL_CLIENT_ID, getPortalClientRoles, hasPortalAccess } from '@/libs/auth/claims'
 import { captureLogoutIdToken } from '@/libs/auth/logout-context'
-import { extractRealmRoles } from '@/libs/auth/realm-roles'
+import { extractClientRoles } from '@/libs/auth/realm-roles'
 
 declare module 'next-auth' {
   interface Session {
-    realmRoles: string[] // Keycloak realm roles extracted server-side; no tokens are exposed on Session.
-    user: { givenName?: string | null } & DefaultSession['user']
+    clientRoles: string[] // Validated Keycloak client roles; provider tokens are never exposed on Session.
+    user: { id: string; givenName?: string | null } & DefaultSession['user']
   }
 }
 
 declare module '@auth/core/jwt' {
   interface JWT {
     idToken?: string
-    realmRoles?: string[]
+    clientRoles?: string[]
     givenName?: string
   }
 }
@@ -33,7 +33,7 @@ declare module '@auth/core/jwt' {
  * - AUTH_SECRET           -> encrypts the session cookie (JWE)
  *
  * Flow: OIDC Authorization Code + PKCE (S256) + state. Auth.js validates the ID-token response.
- * Realm roles prefer those validated ID-token claims; the access-token fallback independently
+ * Client roles prefer those validated ID-token claims; the access-token fallback independently
  * verifies its RS256 signature against Keycloak JWKS. Keycloak must use HTTPS outside loopback.
  *
  * AUTH_URL defines the canonical deployment origin. A reverse proxy may set AUTH_TRUST_HOST=true
@@ -66,28 +66,32 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // Initial sign-in only: keep the minimal claims needed by the app. The ID token stays
       // inside Auth.js's encrypted cookie and is used only for Keycloak RP-initiated logout.
       if (account && profile) {
-        const { roles, source } = await extractRealmRoles({
+        // A mismatched OAuth Client is a deployment error and must not authorize roles from another Client.
+        const clientId = process.env.AUTH_KEYCLOAK_ID === PORTAL_CLIENT_ID ? PORTAL_CLIENT_ID : undefined
+
+        const { roles: claimedRoles, source } = await extractClientRoles({
           idTokenClaims: profile,
           accessToken: account.access_token,
           issuer: process.env.AUTH_KEYCLOAK_ISSUER,
-          clientId: process.env.AUTH_KEYCLOAK_ID
+          clientId
         })
 
+        const clientRoles = getPortalClientRoles(claimedRoles)
+
         token.idToken = typeof account.id_token === 'string' ? account.id_token : undefined
-        token.realmRoles = roles
+        token.clientRoles = clientRoles
         token.givenName = typeof profile.given_name === 'string' ? profile.given_name : undefined
 
         if (process.env.NODE_ENV === 'development') {
-          console.info(
-            `[auth] realm roles claim source: ${source}; ${PORTAL_REALM_ROLE} present: ${roles.includes(PORTAL_REALM_ROLE)}`
-          )
+          console.info(`[auth] client roles claim source: ${source}; portal access: ${hasPortalAccess(clientRoles)}`)
         }
       }
 
       return token
     },
     session({ session, token }) {
-      session.realmRoles = Array.isArray(token.realmRoles) ? token.realmRoles : []
+      session.clientRoles = getPortalClientRoles(token.clientRoles)
+      session.user.id = token.sub ?? ''
       session.user.givenName = token.givenName ?? null
 
       return session

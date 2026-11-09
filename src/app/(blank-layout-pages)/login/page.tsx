@@ -11,7 +11,7 @@ import { getServerMode } from '@core/utils/serverHelpers'
 
 // Auth Imports
 import { auth } from '@/auth'
-import { PORTAL_REALM_ROLE, hasRealmRole } from '@/libs/auth/claims'
+import { hasPortalAccess } from '@/libs/auth/claims'
 
 export const metadata: Metadata = {
   title: 'Connexion | I-Con',
@@ -29,7 +29,7 @@ const LoginPage = async ({ searchParams }: Props) => {
   const { error, logout } = await searchParams
 
   // Authorized users go straight to the protected Welcome page.
-  if (session?.user && hasRealmRole(session.realmRoles, PORTAL_REALM_ROLE)) redirect('/welcome')
+  if (session?.user && hasPortalAccess(session.clientRoles)) redirect('/welcome')
 
   // Authenticated but unauthorized users stay here (no redirect loop) and see an access notice.
   // Only non-sensitive display fields are passed to the client component.

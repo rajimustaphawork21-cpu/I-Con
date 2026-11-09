@@ -81,6 +81,9 @@ const HorizontalMenu = () => {
         <MenuItem href='/welcome' icon={<i className='tabler-smart-home' />}>
           Accueil
         </MenuItem>
+        <MenuItem href='/users' icon={<i className='tabler-users' />}>
+          Utilisateurs
+        </MenuItem>
       </Menu>
       {/* <Menu
         rootStyles={menuRootStyles(theme)}
