@@ -189,6 +189,76 @@ test('account-id scope fetches only authorized users and searches before paginat
   )
 })
 
+test('getById reloads one Keycloak user and returns only allowlisted identity fields', async () => {
+  await withKeycloakServer(
+    (request, response) => {
+      const url = new URL(request.url, 'http://keycloak.test')
+
+      if (request.method === 'POST' && url.pathname === tokenPath) {
+        json(response, 200, { access_token: 'service-account-token' })
+
+        return
+      }
+
+      if (url.pathname === `${usersPath}/user-1`) {
+        json(response, 200, {
+          id: 'user-1',
+          username: 'alice',
+          firstName: 'Alice',
+          lastName: 'Example',
+          email: 'alice@example.test',
+          enabled: false,
+          attributes: { protected: ['true'] },
+          credentials: [{ type: 'password' }]
+        })
+
+        return
+      }
+
+      response.writeHead(404)
+      response.end()
+    },
+    async (adminBaseUrl, requests) => {
+      const adapter = createAdapter(adminBaseUrl)
+
+      assert.deepEqual(await adapter.getById('user-1'), {
+        id: 'user-1',
+        username: 'alice',
+        firstName: 'Alice',
+        lastName: 'Example',
+        email: 'alice@example.test',
+        enabled: false
+      })
+      assert.deepEqual(
+        requests.map(request => request.url),
+        [tokenPath, `${usersPath}/user-1`]
+      )
+    }
+  )
+})
+
+test('getById maps a missing Keycloak user to null', async () => {
+  await withKeycloakServer(
+    (request, response) => {
+      const url = new URL(request.url, 'http://keycloak.test')
+
+      if (request.method === 'POST' && url.pathname === tokenPath) {
+        json(response, 200, { access_token: 'service-account-token' })
+
+        return
+      }
+
+      response.writeHead(404)
+      response.end()
+    },
+    async adminBaseUrl => {
+      const adapter = createAdapter(adminBaseUrl)
+
+      assert.equal(await adapter.getById('missing-user'), null)
+    }
+  )
+})
+
 test('an unresolved visibility scope fails before any Keycloak request', async () => {
   await withKeycloakServer(
     (_request, response) => {

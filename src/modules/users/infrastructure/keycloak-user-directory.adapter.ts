@@ -1,5 +1,8 @@
 import 'server-only'
 
+// Auth Imports
+import type { TrustedUserProtectionFacts } from '@/libs/auth/authorization-policy'
+
 // Type Imports
 import type {
   UserDirectoryAdapter,
@@ -26,6 +29,17 @@ export type KeycloakDirectoryConfiguration = {
   realm: string
   clientId: string
   clientSecret: string
+  realmManagementClientUuid?: string
+  realmManagementClientUuidValidated?: boolean
+  realmManagementRoleVisibilityValidated?: boolean
+  realmAdministrationRoleNames?: readonly string[]
+  realmAdministrationRoleVisibilityValidated?: boolean
+  ssoAdministratorsGroupPath?: string
+}
+
+export type KeycloakResolvedUserProtection = {
+  resolution: 'resolved'
+  value: TrustedUserProtectionFacts
 }
 
 export type KeycloakUserDirectoryErrorCode =
@@ -54,18 +68,30 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
 
 const readConfiguration = (): KeycloakDirectoryConfiguration => {
-  const configuration = {
+  const requiredConfiguration = {
     adminBaseUrl: process.env.ICON_KEYCLOAK_ADMIN_URL,
     realm: process.env.ICON_KEYCLOAK_REALM,
     clientId: process.env.ICON_KEYCLOAK_DIRECTORY_CLIENT_ID,
     clientSecret: process.env.ICON_KEYCLOAK_DIRECTORY_CLIENT_SECRET
   }
 
-  if (Object.values(configuration).some(value => !value)) {
+  if (Object.values(requiredConfiguration).some(value => !value)) {
     throw new KeycloakUserDirectoryError('CONFIGURATION_ERROR')
   }
 
-  return configuration as KeycloakDirectoryConfiguration
+  return {
+    ...(requiredConfiguration as KeycloakDirectoryConfiguration),
+    realmManagementClientUuid: process.env.ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID,
+    realmManagementClientUuidValidated:
+      process.env.ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID_VALIDATED === 'true',
+    realmManagementRoleVisibilityValidated:
+      process.env.ICON_KEYCLOAK_REALM_MANAGEMENT_ROLE_VISIBILITY_VALIDATED === 'true',
+    realmAdministrationRoleNames:
+      process.env.ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLES?.split(',').map(roleName => roleName.trim()),
+    realmAdministrationRoleVisibilityValidated:
+      process.env.ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLE_VISIBILITY_VALIDATED === 'true',
+    ssoAdministratorsGroupPath: process.env.ICON_KEYCLOAK_SSO_ADMINISTRATORS_GROUP_PATH
+  }
 }
 
 const normalizeConfiguration = (configuration: KeycloakDirectoryConfiguration): KeycloakDirectoryConfiguration => {
@@ -73,7 +99,13 @@ const normalizeConfiguration = (configuration: KeycloakDirectoryConfiguration): 
     adminBaseUrl: configuration.adminBaseUrl.trim(),
     realm: configuration.realm.trim(),
     clientId: configuration.clientId.trim(),
-    clientSecret: configuration.clientSecret
+    clientSecret: configuration.clientSecret,
+    realmManagementClientUuid: configuration.realmManagementClientUuid?.trim(),
+    realmManagementClientUuidValidated: configuration.realmManagementClientUuidValidated,
+    realmManagementRoleVisibilityValidated: configuration.realmManagementRoleVisibilityValidated,
+    realmAdministrationRoleNames: configuration.realmAdministrationRoleNames?.map(roleName => roleName.trim()),
+    realmAdministrationRoleVisibilityValidated: configuration.realmAdministrationRoleVisibilityValidated,
+    ssoAdministratorsGroupPath: configuration.ssoAdministratorsGroupPath?.trim()
   }
 
   if (!normalized.adminBaseUrl || !normalized.realm || !normalized.clientId || !normalized.clientSecret) {
@@ -128,6 +160,117 @@ const readOptionalString = (value: unknown, field: string) => {
   if (typeof value !== 'string') throw new KeycloakUserDirectoryError('INVALID_UPSTREAM_RESPONSE')
 
   return { [field]: value }
+}
+
+const invalidProtectionResponse = () => new KeycloakUserDirectoryError('INVALID_UPSTREAM_RESPONSE')
+
+const readEffectiveRoleNames = (value: unknown) => {
+  if (!Array.isArray(value)) throw invalidProtectionResponse()
+
+  const names = value.map(role => (isRecord(role) ? role.name : null))
+
+  if (!names.every((name): name is string => typeof name === 'string' && name.length > 0)) {
+    throw invalidProtectionResponse()
+  }
+
+  return names
+}
+
+const readGroupCount = (value: unknown) => {
+  if (!isRecord(value) || !Number.isSafeInteger(value.count) || (value.count as number) < 0) {
+    throw invalidProtectionResponse()
+  }
+
+  return value.count as number
+}
+
+const readGroupPaths = (value: unknown) => {
+  if (!Array.isArray(value)) throw invalidProtectionResponse()
+
+  const paths = value.map(group => (isRecord(group) ? group.path : null))
+
+  if (!paths.every((path): path is string => typeof path === 'string' && path.startsWith('/'))) {
+    throw invalidProtectionResponse()
+  }
+
+  return paths
+}
+
+const readUserProtectionIdentity = (value: unknown, expectedUser: Pick<DirectoryUser, 'id' | 'username'>) => {
+  if (
+    !isRecord(value) ||
+    value.id !== expectedUser.id ||
+    value.username !== expectedUser.username ||
+    (value.attributes !== undefined && value.attributes !== null && !isRecord(value.attributes)) ||
+    (value.serviceAccountClientId !== undefined &&
+      value.serviceAccountClientId !== null &&
+      typeof value.serviceAccountClientId !== 'string')
+  ) {
+    throw invalidProtectionResponse()
+  }
+
+  const attributes = isRecord(value.attributes) ? value.attributes : {}
+  const protectedValues = attributes.protected
+
+  if (
+    protectedValues !== undefined &&
+    (!Array.isArray(protectedValues) || !protectedValues.every(item => typeof item === 'string'))
+  ) {
+    throw invalidProtectionResponse()
+  }
+
+  return {
+    hasProtectedAttribute: Array.isArray(protectedValues) && protectedValues.includes('true'),
+    isServiceAccount:
+      typeof value.serviceAccountClientId === 'string' && value.serviceAccountClientId.length > 0
+  }
+}
+
+const MAX_PROTECTION_GROUP_MEMBERSHIPS = 10_000
+const PROTECTION_GROUP_PAGE_SIZE = 100
+const PROTECTION_ROLE_NAME_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
+
+type ProtectionFactStates = {
+  [Fact in keyof TrustedUserProtectionFacts]: boolean | null
+}
+
+const unresolvedProtectionFacts = (): ProtectionFactStates => ({
+  hasRealmManagementRole: null,
+  hasRealmAdministrationRole: null,
+  isSsoAdministratorsGroupMember: null,
+  hasProtectedAttribute: null,
+  isServiceAccount: null
+})
+
+/**
+ * A confirmed protected fact is sufficient for RG-37 even when another source is unavailable.
+ * Unknown facts are normalized to false only after at least one true fact has made the aggregate
+ * protected; an aggregate unprotected result requires every fact to be conclusively false.
+ */
+const finalizeProtection = (facts: ProtectionFactStates): KeycloakResolvedUserProtection | null => {
+  const values = Object.values(facts)
+  const hasConfirmedProtection = values.some(value => value === true)
+
+  if (!hasConfirmedProtection && values.some(value => value === null)) return null
+
+  return {
+    resolution: 'resolved',
+    value: {
+      hasRealmManagementRole: facts.hasRealmManagementRole === true,
+      hasRealmAdministrationRole: facts.hasRealmAdministrationRole === true,
+      isSsoAdministratorsGroupMember: facts.isSsoAdministratorsGroupMember === true,
+      hasProtectedAttribute: facts.hasProtectedAttribute === true,
+      isServiceAccount: facts.isServiceAccount === true
+    }
+  }
+}
+
+const resolveFactSource = async <Value>(resolve: () => Promise<Value>): Promise<Value | null> => {
+  try {
+    return await resolve()
+  } catch {
+    return null
+  }
 }
 
 export const mapKeycloakUser = (value: unknown): DirectoryUser => {
@@ -196,6 +339,175 @@ export class KeycloakUserDirectoryAdapter
     return scope.mode === 'realm-wide'
       ? this.listRealmUsers(query, accessToken)
       : this.listUsersById(query, scope.accountIds, accessToken)
+  }
+
+  async getById(accountId: string): Promise<DirectoryUser | null> {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(accountId)) return null
+
+    const accessToken = await this.getServiceAccountAccessToken()
+    const usersPath = `/admin/realms/${encodeURIComponent(this.configuration.realm)}/users`
+
+    const response = await this.fetchImplementation(
+      buildUrl(this.configuration, `${usersPath}/${encodeURIComponent(accountId)}`),
+      {
+        headers: {
+          accept: 'application/json',
+          authorization: `Bearer ${accessToken}`
+        }
+      }
+    )
+
+    if (response.status === 404) return null
+    if (!response.ok) throw new KeycloakUserDirectoryError('UPSTREAM_REQUEST_FAILED', response.status)
+
+    return mapKeycloakUser(await parseJson(response))
+  }
+
+  /** Resolves every RG-37 fact from Keycloak Admin REST or returns unresolved. */
+  async resolveProtection(
+    user: Pick<DirectoryUser, 'id' | 'username'>
+  ): Promise<KeycloakResolvedUserProtection | null> {
+    const protectionConfiguration = this.readProtectionConfiguration()
+
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(user.id)) return null
+
+    let accessToken: string
+
+    try {
+      accessToken = await this.getServiceAccountAccessToken()
+    } catch {
+      return null
+    }
+
+    const usersPath = `/admin/realms/${encodeURIComponent(this.configuration.realm)}/users`
+    const userPath = `${usersPath}/${encodeURIComponent(user.id)}`
+    const facts = unresolvedProtectionFacts()
+
+    // The username came from the preceding trusted Keycloak reload, so its service-account prefix
+    // remains a positive signal even if the fuller identity request below becomes unavailable.
+    if (user.username.startsWith('service-account-')) facts.isServiceAccount = true
+
+    const identityPromise = resolveFactSource(async () =>
+      readUserProtectionIdentity(await this.getAdminJson(userPath, accessToken), user)
+    )
+
+    const realmManagementRolesPromise = protectionConfiguration.realmManagement
+      ? resolveFactSource(async () => {
+          const rolesPath =
+            `${userPath}/role-mappings/clients/` +
+            `${encodeURIComponent(protectionConfiguration.realmManagement!.clientUuid)}` +
+            '/composite?briefRepresentation=true'
+
+          const roleNames = readEffectiveRoleNames(await this.getAdminJson(rolesPath, accessToken))
+
+          if (roleNames.length > 0) return true
+
+          // Keycloak 26.8 can return a filtered 200 [] when the reader cannot view this client.
+          return protectionConfiguration.realmManagement!.roleVisibilityValidated ? false : null
+        })
+      : Promise.resolve(null)
+
+    const realmAdministrationRolesPromise = protectionConfiguration.realmAdministration
+      ? resolveFactSource(async () => {
+          const rolesPath = `${userPath}/role-mappings/realm/composite?briefRepresentation=true`
+          const roleNames = readEffectiveRoleNames(await this.getAdminJson(rolesPath, accessToken))
+
+          const hasApprovedAdministrationRole = roleNames.some(roleName =>
+            protectionConfiguration.realmAdministration!.roleNames.has(roleName)
+          )
+
+          if (hasApprovedAdministrationRole) return true
+
+          // Absence is trustworthy only after provisioning established complete realm-role visibility.
+          return protectionConfiguration.realmAdministration!.roleVisibilityValidated ? false : null
+        })
+      : Promise.resolve(null)
+
+    const groupMembershipPromise = protectionConfiguration.ssoAdministratorsGroupPath
+      ? resolveFactSource(async () => {
+          const groupCount = readGroupCount(await this.getAdminJson(`${userPath}/groups/count`, accessToken))
+
+          if (groupCount > MAX_PROTECTION_GROUP_MEMBERSHIPS) throw invalidProtectionResponse()
+
+          const groupPaths = await this.getAllUserGroupPaths(userPath, groupCount, accessToken)
+          const administratorsPath = protectionConfiguration.ssoAdministratorsGroupPath!
+
+          return groupPaths.some(path => path === administratorsPath || path.startsWith(`${administratorsPath}/`))
+        })
+      : Promise.resolve(null)
+
+    const [identityFacts, hasRealmManagementRole, hasRealmAdministrationRole, isGroupMember] =
+      await Promise.all([
+        identityPromise,
+        realmManagementRolesPromise,
+        realmAdministrationRolesPromise,
+        groupMembershipPromise
+      ])
+
+    if (identityFacts) {
+      facts.hasProtectedAttribute = identityFacts.hasProtectedAttribute
+      facts.isServiceAccount = identityFacts.isServiceAccount || facts.isServiceAccount === true
+    }
+
+    facts.hasRealmManagementRole = hasRealmManagementRole
+    facts.hasRealmAdministrationRole = hasRealmAdministrationRole
+    facts.isSsoAdministratorsGroupMember = isGroupMember
+
+    return finalizeProtection(facts)
+  }
+
+  private readProtectionConfiguration() {
+    const realmManagementClientUuid = this.configuration.realmManagementClientUuid
+    const ssoAdministratorsGroupPath = this.configuration.ssoAdministratorsGroupPath
+    const realmAdministrationRoleNames = this.configuration.realmAdministrationRoleNames
+
+    const hasApprovedRealmAdministrationRoleInventory =
+      Array.isArray(realmAdministrationRoleNames) &&
+      realmAdministrationRoleNames.length > 0 &&
+      realmAdministrationRoleNames.every(roleName => PROTECTION_ROLE_NAME_PATTERN.test(roleName))
+
+    return {
+      realmManagement:
+        realmManagementClientUuid &&
+        /^[A-Za-z0-9_-]{1,128}$/.test(realmManagementClientUuid) &&
+        this.configuration.realmManagementClientUuidValidated === true
+          ? {
+              clientUuid: realmManagementClientUuid,
+              roleVisibilityValidated: this.configuration.realmManagementRoleVisibilityValidated === true
+            }
+          : null,
+      realmAdministration: hasApprovedRealmAdministrationRoleInventory
+        ? {
+            roleNames: new Set(realmAdministrationRoleNames),
+            roleVisibilityValidated:
+              this.configuration.realmAdministrationRoleVisibilityValidated === true
+          }
+        : null,
+      ssoAdministratorsGroupPath:
+        ssoAdministratorsGroupPath && /^\/[^/]+(?:\/[^/]+)*$/.test(ssoAdministratorsGroupPath)
+          ? ssoAdministratorsGroupPath
+          : null
+    }
+  }
+
+  private async getAllUserGroupPaths(userPath: string, groupCount: number, accessToken: string) {
+    const paths: string[] = []
+
+    while (paths.length < groupCount) {
+      const parameters = new URLSearchParams({
+        briefRepresentation: 'true',
+        first: String(paths.length),
+        max: String(PROTECTION_GROUP_PAGE_SIZE)
+      })
+
+      const page = readGroupPaths(await this.getAdminJson(`${userPath}/groups?${parameters}`, accessToken))
+
+      if (page.length === 0 || paths.length + page.length > groupCount) throw invalidProtectionResponse()
+
+      paths.push(...page)
+    }
+
+    return paths
   }
 
   private async getServiceAccountAccessToken() {

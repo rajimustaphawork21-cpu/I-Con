@@ -289,13 +289,17 @@ const isTrustedUser = (value: unknown): value is TrustedUserTarget => {
   )
 }
 
-const isProtectedUser = (user: TrustedUserTarget) =>
+export const isProtectedUserAccount = (
+  user: Pick<TrustedUserTarget, 'username' | 'protection'>
+) =>
   user.username.startsWith('service-account-') ||
   user.protection.hasRealmManagementRole ||
   user.protection.hasRealmAdministrationRole ||
   user.protection.isSsoAdministratorsGroupMember ||
   user.protection.hasProtectedAttribute ||
   user.protection.isServiceAccount
+
+const isProtectedUser = (user: TrustedUserTarget) => isProtectedUserAccount(user)
 
 const isTrustedApplication = (value: unknown): value is TrustedApplicationTarget => {
   if (!value || typeof value !== 'object') return false

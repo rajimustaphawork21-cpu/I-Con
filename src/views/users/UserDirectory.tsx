@@ -3,6 +3,9 @@
 // React Imports
 import { useEffect, useState } from 'react'
 
+// Next Imports
+import Link from 'next/link'
+
 // MUI Imports
 import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
@@ -226,6 +229,7 @@ const UserDirectory = () => {
                       <TableCell>Nom</TableCell>
                       <TableCell>E-mail</TableCell>
                       <TableCell>État du compte</TableCell>
+                      <TableCell align='right'>Action</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -242,6 +246,16 @@ const UserDirectory = () => {
                             color={user.enabled ? 'success' : 'secondary'}
                             label={user.enabled ? 'Activé' : 'Désactivé'}
                           />
+                        </TableCell>
+                        <TableCell align='right'>
+                          <Button
+                            component={Link}
+                            href={`/users/${encodeURIComponent(user.id)}`}
+                            size='small'
+                            endIcon={<i className='tabler-chevron-right' aria-hidden='true' />}
+                          >
+                            Consulter
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}

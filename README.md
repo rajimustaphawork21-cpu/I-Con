@@ -80,12 +80,43 @@ ICON_KEYCLOAK_ADMIN_URL=http://localhost:8080
 ICON_KEYCLOAK_REALM=I-Con
 ICON_KEYCLOAK_DIRECTORY_CLIENT_ID=icon-directory-reader
 ICON_KEYCLOAK_DIRECTORY_CLIENT_SECRET=replace-with-the-directory-reader-client-secret
+ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID=replace-with-the-internal-realm-management-client-uuid
+ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID_VALIDATED=false
+ICON_KEYCLOAK_REALM_MANAGEMENT_ROLE_VISIBILITY_VALIDATED=false
+ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLES=admin,create-realm
+ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLE_VISIBILITY_VALIDATED=false
+ICON_KEYCLOAK_SSO_ADMINISTRATORS_GROUP_PATH=/Administrateurs-SSO
 ```
 
 Never prefix these variables with `NEXT_PUBLIC_`. The service-account token is requested and consumed only by the
 BFF. Directory access also requires an explicit trusted visibility scope: either a realm-wide scope approved by a
 future server-side scope resolver, or a concrete set of approved Keycloak account IDs. The adapter never infers
 realm-wide access from a missing or malformed scope.
+
+These values are required for complete RG-37 account-protection resolution. The client UUID is Keycloak's internal
+UUID for the built-in `realm-management` client, not its `clientId`. During privileged provisioning, resolve
+`GET /admin/realms/I-Con/clients?clientId=realm-management`, require exactly one result, then verify
+`GET /admin/realms/I-Con/clients/{uuid}` still has `clientId=realm-management`. Pin that UUID and set
+`ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID_VALIDATED=true`. The BFF deliberately performs no runtime client
+discovery. An absent validation attestation leaves that protection source unresolved.
+
+`ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLES` is the approved inventory of effective Realm roles that RG-37 treats as
+administrative. The example contains the roles identified by the CDCF/CDCT; reconcile it with the approved IAM
+inventory during provisioning. A missing, empty, or malformed inventory leaves Realm-administration protection
+unresolved. The group path must be the approved absolute Keycloak path for `Administrateurs-SSO`.
+
+Protection resolution reads the full user representation, effective `realm-management` client-role mappings,
+effective Realm-role mappings, and complete group membership. With the directory-reader identity, provisioning must
+verify that a known-positive client-role fixture and a known-positive approved Realm-role fixture are both visible
+from their respective `/composite` endpoints before setting the corresponding `*_VISIBILITY_VALIDATED=true`
+attestations. This is necessary because Keycloak 26.8 can return HTTP 200 with a filtered empty role list.
+
+The directory reader needs read-only visibility of the `realm-management` client (for example, an exact fine-grained
+read permission for that client, or the broader `view-clients`) and read visibility of the approved administrative
+Realm roles. Keep `query-users` and `view-users`; do not grant `manage-users`, `manage-clients`, `realm-admin`, or
+another write-capable role. Do not set either visibility attestation merely because the endpoint returns HTTP 200.
+A failed or unvalidated source remains unresolved; a confirmed protected signal from another trusted source is
+preserved. The BFF returns an unprotected result only after every required RG-37 source is conclusively false.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
