@@ -5,11 +5,6 @@ import keycloakDirectoryModule from '../../src/modules/users/infrastructure/keyc
 
 const { KeycloakUserDirectoryAdapter } = keycloakDirectoryModule
 
-const tokenPath = '/realms/I-Con/protocol/openid-connect/token'
-const userPath = '/admin/realms/I-Con/users/user-1'
-const effectiveRealmManagementRolesPath = `${userPath}/role-mappings/clients/realm-management-uuid/composite`
-const effectiveRealmRolesPath = `${userPath}/role-mappings/realm/composite`
-
 const ordinaryFacts = {
   hasRealmManagementRole: false,
   hasRealmAdministrationRole: false,
@@ -28,54 +23,117 @@ const createProtectionResolver = ({
   realmManagementClientUuidValidated = true,
   realmManagementRoleVisibilityValidated = true,
   realmAdministrationRoleVisibilityValidated = true,
-  realmAdministrationRoleNames = ['admin', 'create-realm']
+  realmAdministrationRoleNames = ['admin', 'create-realm'],
+  readConfigurationFromEnvironment = false,
+  realmAdministrationRolesEnvironment
 } = {}) => {
   const requests = []
+  const record = (operation, payload) => requests.push({ operation, payload })
 
-  const fetch = async (input, init = {}) => {
-    const url = new URL(input)
+  const fail = operation => {
+    const isClientRoleMapping = operation === 'listCompositeClientRoleMappings'
+    const isAnyRoleMapping = operation.includes('RoleMappings')
 
-    requests.push({ method: init.method ?? 'GET', pathname: url.pathname, search: url.search })
-
-    if (url.pathname === tokenPath) return Response.json({ access_token: 'service-account-token' })
-    if (failPath && url.pathname.includes(failPath)) return Response.json({ error: 'forbidden' }, { status: 403 })
-
-    assert.equal(init.headers.authorization, 'Bearer service-account-token')
-
-    if (url.pathname === userPath) return Response.json(user)
-    if (url.pathname === effectiveRealmManagementRolesPath) return Response.json(effectiveRealmManagementRoles)
-    if (url.pathname === effectiveRealmRolesPath) return Response.json(effectiveRealmRoles)
-    if (url.pathname === `${userPath}/groups/count`) return Response.json({ count: groups.length })
-
-    if (url.pathname === `${userPath}/groups`) {
-      const first = Number(url.searchParams.get('first'))
-      const max = Number(url.searchParams.get('max'))
-
-      return Response.json(groups.slice(first, first + max))
+    if (
+      (failPath === '/role-mappings/clients/' && isClientRoleMapping) ||
+      (failPath === '/role-mappings/' && isAnyRoleMapping)
+    ) {
+      throw new Error('forbidden')
     }
-
-    return Response.json({ error: 'not_found' }, { status: 404 })
   }
 
-  const adapter = new KeycloakUserDirectoryAdapter({
-    configuration: {
-      adminBaseUrl: 'https://keycloak.example.test',
-      realm: 'I-Con',
-      clientId: 'icon-directory-reader',
-      clientSecret: 'test-secret',
-      ...(includeProtectionConfiguration
-        ? {
-            realmManagementClientUuid: 'realm-management-uuid',
-            realmManagementClientUuidValidated,
-            realmManagementRoleVisibilityValidated,
-            realmAdministrationRoleNames,
-            realmAdministrationRoleVisibilityValidated,
-            ssoAdministratorsGroupPath: '/Administrateurs-SSO'
-          }
-        : {})
+  const adminClient = {
+    auth: async credentials => {
+      record('auth', credentials)
     },
-    fetch
-  })
+    getAccessToken: async () => 'service-account-token',
+    users: {
+      findOne: async payload => {
+        record('findOne', payload)
+
+        return user
+      },
+      listCompositeClientRoleMappings: async payload => {
+        record('listCompositeClientRoleMappings', payload)
+        fail('listCompositeClientRoleMappings')
+
+        return effectiveRealmManagementRoles
+      },
+      listCompositeRealmRoleMappings: async payload => {
+        record('listCompositeRealmRoleMappings', payload)
+        fail('listCompositeRealmRoleMappings')
+
+        return effectiveRealmRoles
+      },
+      countGroups: async payload => {
+        record('countGroups', payload)
+
+        return { count: groups.length }
+      },
+      listGroups: async payload => {
+        record('listGroups', payload)
+
+        return groups.slice(payload.first, payload.first + payload.max)
+      }
+    }
+  }
+
+  const adapterOptions = {
+    adminClientFactory: () => adminClient
+  }
+
+  let adapter
+
+  if (readConfigurationFromEnvironment) {
+    const environment = {
+      ICON_KEYCLOAK_ADMIN_URL: 'https://keycloak.example.test',
+      ICON_KEYCLOAK_REALM: 'I-Con',
+      ICON_KEYCLOAK_DIRECTORY_CLIENT_ID: 'icon-directory-reader',
+      ICON_KEYCLOAK_DIRECTORY_CLIENT_SECRET: 'test-secret',
+      ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID: 'realm-management-uuid',
+      ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID_VALIDATED: 'true',
+      ICON_KEYCLOAK_REALM_MANAGEMENT_ROLE_VISIBILITY_VALIDATED: 'true',
+      ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLES: realmAdministrationRolesEnvironment,
+      ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLE_VISIBILITY_VALIDATED: 'true',
+      ICON_KEYCLOAK_SSO_ADMINISTRATORS_GROUP_PATH: '/Administrateurs-SSO'
+    }
+
+    const previousEnvironment = new Map(Object.keys(environment).map(name => [name, process.env[name]]))
+
+    try {
+      for (const [name, value] of Object.entries(environment)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+
+      adapter = new KeycloakUserDirectoryAdapter(adapterOptions)
+    } finally {
+      for (const [name, value] of previousEnvironment) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+    }
+  } else {
+    adapter = new KeycloakUserDirectoryAdapter({
+      ...adapterOptions,
+      configuration: {
+        adminBaseUrl: 'https://keycloak.example.test',
+        realm: 'I-Con',
+        clientId: 'icon-directory-reader',
+        clientSecret: 'test-secret',
+        ...(includeProtectionConfiguration
+          ? {
+              realmManagementClientUuid: 'realm-management-uuid',
+              realmManagementClientUuidValidated,
+              realmManagementRoleVisibilityValidated,
+              realmAdministrationRoleNames,
+              realmAdministrationRoleVisibilityValidated,
+              ssoAdministratorsGroupPath: '/Administrateurs-SSO'
+            }
+          : {})
+      }
+    })
+  }
 
   return {
     requests,
@@ -101,8 +159,9 @@ test('an effective realm-management role protects the account', async () => {
   assert.ok(
     requests.some(
       request =>
-        request.pathname === effectiveRealmManagementRolesPath &&
-        request.search.includes('briefRepresentation=true')
+        request.operation === 'listCompositeClientRoleMappings' &&
+        request.payload.clientUniqueId === 'realm-management-uuid' &&
+        request.payload.id === 'user-1'
     )
   )
 })
@@ -125,10 +184,7 @@ test('an approved effective realm administration role is evaluated separately', 
   assert.equal(protection.value.hasRealmManagementRole, false)
   assert.equal(protection.value.hasRealmAdministrationRole, true)
   assert.ok(
-    requests.some(
-      request =>
-        request.pathname === effectiveRealmRolesPath && request.search.includes('briefRepresentation=true')
-    )
+    requests.some(request => request.operation === 'listCompositeRealmRoleMappings' && request.payload.id === 'user-1')
   )
 })
 
@@ -140,8 +196,8 @@ test('effective roles inherited through groups or composites are included by the
   const protection = await resolve()
 
   assert.equal(protection.value.hasRealmManagementRole, true)
-  assert.ok(requests.some(request => request.pathname.endsWith('/composite')))
-  assert.ok(!requests.some(request => request.pathname.endsWith('/role-mappings/clients/realm-management-uuid')))
+  assert.ok(requests.some(request => request.operation === 'listCompositeClientRoleMappings'))
+  assert.ok(!requests.some(request => request.operation === 'listClientRoleMappings'))
 })
 
 test('Administrateurs-SSO membership is found across complete paginated group membership', async () => {
@@ -153,7 +209,7 @@ test('Administrateurs-SSO membership is found across complete paginated group me
   const protection = await resolve()
 
   assert.equal(protection.value.isSsoAdministratorsGroupMember, true)
-  assert.equal(requests.filter(request => request.pathname === `${userPath}/groups`).length, 2)
+  assert.equal(requests.filter(request => request.operation === 'listGroups').length, 2)
 })
 
 test('the protected=true user attribute protects the account', async () => {
@@ -190,6 +246,48 @@ test('an empty filtered Realm-role response stays unresolved without visibility 
   assert.equal(await resolve(), null)
 })
 
+test('Realm administration inventory env distinguishes missing, blank, malformed, and explicit empty', async () => {
+  const cases = [
+    { label: 'missing', value: undefined, expected: null },
+    { label: 'blank', value: '', expected: null },
+    { label: 'malformed', value: ' [] ', expected: null },
+    {
+      label: 'explicit empty',
+      value: '[]',
+      expected: { resolution: 'resolved', value: ordinaryFacts }
+    }
+  ]
+
+  for (const testCase of cases) {
+    const { requests, resolve } = createProtectionResolver({
+      readConfigurationFromEnvironment: true,
+      realmAdministrationRolesEnvironment: testCase.value
+    })
+
+    assert.deepEqual(await resolve(), testCase.expected, testCase.label)
+    assert.ok(
+      !requests.some(request => request.operation === 'listCompositeRealmRoleMappings'),
+      `${testCase.label} inventory must not query Realm role mappings`
+    )
+  }
+})
+
+test('a protected signal wins with an explicitly empty Realm administration inventory', async () => {
+  const { requests, resolve } = createProtectionResolver({
+    user: { id: 'user-1', username: 'alice', enabled: true, attributes: { protected: ['true'] } },
+    failPath: '/role-mappings/clients/',
+    readConfigurationFromEnvironment: true,
+    realmAdministrationRolesEnvironment: '[]'
+  })
+
+  const protection = await resolve()
+
+  assert.equal(protection.resolution, 'resolved')
+  assert.equal(protection.value.hasProtectedAttribute, true)
+  assert.equal(protection.value.hasRealmAdministrationRole, false)
+  assert.ok(!requests.some(request => request.operation === 'listCompositeRealmRoleMappings'))
+})
+
 test('an unvalidated pinned realm-management UUID is not queried or trusted', async () => {
   const { requests, resolve } = createProtectionResolver({
     effectiveRealmManagementRoles: [{ name: 'view-users' }],
@@ -197,7 +295,7 @@ test('an unvalidated pinned realm-management UUID is not queried or trusted', as
   })
 
   assert.equal(await resolve(), null)
-  assert.ok(!requests.some(request => request.pathname === effectiveRealmManagementRolesPath))
+  assert.ok(!requests.some(request => request.operation === 'listCompositeClientRoleMappings'))
 })
 
 test('a Keycloak service-account identity protects the account', async () => {
@@ -219,15 +317,13 @@ test('a Keycloak service-account identity protects the account', async () => {
 test('missing approved configuration and unavailable or malformed facts stay unresolved', async () => {
   const missingConfiguration = createProtectionResolver({ includeProtectionConfiguration: false })
   const forbiddenRoleData = createProtectionResolver({ failPath: '/role-mappings/' })
-  const missingAdministrationRoleInventory = createProtectionResolver({ realmAdministrationRoleNames: [] })
 
   const malformedAttribute = createProtectionResolver({
     user: { id: 'user-1', username: 'alice', enabled: true, attributes: { protected: 'true' } }
   })
 
   assert.equal(await missingConfiguration.resolve(), null)
-  assert.ok(!missingConfiguration.requests.some(request => request.pathname.includes('/role-mappings/')))
+  assert.ok(!missingConfiguration.requests.some(request => request.operation.includes('RoleMappings')))
   assert.equal(await forbiddenRoleData.resolve(), null)
-  assert.equal(await missingAdministrationRoleInventory.resolve(), null)
   assert.equal(await malformedAttribute.resolve(), null)
 })

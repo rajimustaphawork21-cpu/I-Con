@@ -28,6 +28,7 @@ const readBody = async request => {
 
 const withKeycloakServer = async (handle, run) => {
   const requests = []
+
   const server = createServer(async (request, response) => {
     const body = await readBody(request)
 
@@ -79,7 +80,11 @@ test('realm-wide scope sends search and pagination to Keycloak and maps only dir
 
         assert.equal(form.get('grant_type'), 'client_credentials')
         assert.equal(form.get('client_id'), 'icon-directory-reader')
-        assert.equal(form.get('client_secret'), 'test-secret')
+        assert.equal(form.get('client_secret'), null)
+        assert.equal(
+          request.headers.authorization,
+          `Basic ${Buffer.from('icon-directory-reader:test-secret').toString('base64')}`
+        )
         json(response, 200, { access_token: 'service-account-token', expires_in: 60 })
 
         return
@@ -94,7 +99,7 @@ test('realm-wide scope sends search and pagination to Keycloak and maps only dir
         return
       }
 
-      if (url.pathname === usersPath) {
+      if (url.pathname === `${usersPath}/`) {
         assert.equal(url.searchParams.get('search'), 'ahm')
         assert.equal(url.searchParams.get('first'), '20')
         assert.equal(url.searchParams.get('max'), '20')
@@ -171,6 +176,7 @@ test('account-id scope fetches only authorized users and searches before paginat
     },
     async (adminBaseUrl, requests) => {
       const adapter = createAdapter(adminBaseUrl)
+
       const result = await adapter.list(query({ search: 'ali', pageSize: 1 }), {
         mode: 'account-ids',
         accountIds: ['user-1', 'user-2', 'user-1']
@@ -292,6 +298,22 @@ test('service-account authentication failures are mapped without exposing the re
           error.code === 'SERVICE_ACCOUNT_AUTHENTICATION_FAILED' &&
           error.status === 401 &&
           !error.message.includes('must-not-be-exposed')
+      )
+    }
+  )
+})
+
+test('malformed service-account token responses fail closed', async () => {
+  await withKeycloakServer(
+    (_request, response) => {
+      json(response, 200, { expires_in: 60 })
+    },
+    async adminBaseUrl => {
+      const adapter = createAdapter(adminBaseUrl)
+
+      await assert.rejects(
+        () => adapter.list(query(), { mode: 'realm-wide' }),
+        error => error instanceof KeycloakUserDirectoryError && error.code === 'INVALID_UPSTREAM_RESPONSE'
       )
     }
   )

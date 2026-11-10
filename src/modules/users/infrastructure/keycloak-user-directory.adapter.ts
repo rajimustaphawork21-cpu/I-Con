@@ -1,5 +1,8 @@
 import 'server-only'
 
+// Third-party Imports
+import KcAdminClient, { NetworkError } from '@keycloak/keycloak-admin-client'
+
 // Auth Imports
 import type { TrustedUserProtectionFacts } from '@/libs/auth/authorization-policy'
 
@@ -61,11 +64,18 @@ export class KeycloakUserDirectoryError extends Error {
 
 type KeycloakUserDirectoryAdapterOptions = {
   configuration?: KeycloakDirectoryConfiguration
-  fetch?: typeof fetch
+  adminClientFactory?: () => KcAdminClient
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value)
+
+const readRealmAdministrationRoleInventory = (value: string | undefined) => {
+  if (value === undefined) return undefined
+  if (value === '[]') return []
+
+  return value.split(',').map(roleName => roleName.trim())
+}
 
 const readConfiguration = (): KeycloakDirectoryConfiguration => {
   const requiredConfiguration = {
@@ -82,12 +92,12 @@ const readConfiguration = (): KeycloakDirectoryConfiguration => {
   return {
     ...(requiredConfiguration as KeycloakDirectoryConfiguration),
     realmManagementClientUuid: process.env.ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID,
-    realmManagementClientUuidValidated:
-      process.env.ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID_VALIDATED === 'true',
+    realmManagementClientUuidValidated: process.env.ICON_KEYCLOAK_REALM_MANAGEMENT_CLIENT_UUID_VALIDATED === 'true',
     realmManagementRoleVisibilityValidated:
       process.env.ICON_KEYCLOAK_REALM_MANAGEMENT_ROLE_VISIBILITY_VALIDATED === 'true',
-    realmAdministrationRoleNames:
-      process.env.ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLES?.split(',').map(roleName => roleName.trim()),
+    realmAdministrationRoleNames: readRealmAdministrationRoleInventory(
+      process.env.ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLES
+    ),
     realmAdministrationRoleVisibilityValidated:
       process.env.ICON_KEYCLOAK_REALM_ADMINISTRATION_ROLE_VISIBILITY_VALIDATED === 'true',
     ssoAdministratorsGroupPath: process.env.ICON_KEYCLOAK_SSO_ADMINISTRATORS_GROUP_PATH
@@ -137,23 +147,7 @@ const normalizeConfiguration = (configuration: KeycloakDirectoryConfiguration): 
   return { ...normalized, adminBaseUrl: adminUrl.toString().replace(/\/$/, '') }
 }
 
-const buildUrl = (configuration: KeycloakDirectoryConfiguration, path: string) => {
-  const url = new URL(configuration.adminBaseUrl)
-  const requested = new URL(path, 'http://keycloak.internal')
-
-  url.pathname = `${url.pathname.replace(/\/$/, '')}${requested.pathname}`
-  url.search = requested.search
-
-  return url
-}
-
-const parseJson = async (response: Response): Promise<unknown> => {
-  try {
-    return await response.json()
-  } catch {
-    throw new KeycloakUserDirectoryError('INVALID_UPSTREAM_RESPONSE', response.status)
-  }
-}
+const readSdkStatus = (error: unknown) => (error instanceof NetworkError ? error.response.status : undefined)
 
 const readOptionalString = (value: unknown, field: string) => {
   if (value === undefined || value === null || value === '') return undefined
@@ -221,8 +215,7 @@ const readUserProtectionIdentity = (value: unknown, expectedUser: Pick<Directory
 
   return {
     hasProtectedAttribute: Array.isArray(protectedValues) && protectedValues.includes('true'),
-    isServiceAccount:
-      typeof value.serviceAccountClientId === 'string' && value.serviceAccountClientId.length > 0
+    isServiceAccount: typeof value.serviceAccountClientId === 'string' && value.serviceAccountClientId.length > 0
   }
 }
 
@@ -319,11 +312,17 @@ export class KeycloakUserDirectoryAdapter
   implements UserDirectoryAdapter<DirectoryUser, KeycloakAccountVisibilityScope>
 {
   private readonly configuration: KeycloakDirectoryConfiguration
-  private readonly fetchImplementation: typeof fetch
+  private readonly adminClientFactory: () => KcAdminClient
 
   constructor(options: KeycloakUserDirectoryAdapterOptions = {}) {
     this.configuration = normalizeConfiguration(options.configuration ?? readConfiguration())
-    this.fetchImplementation = options.fetch ?? fetch
+    this.adminClientFactory =
+      options.adminClientFactory ??
+      (() =>
+        new KcAdminClient({
+          baseUrl: this.configuration.adminBaseUrl,
+          realmName: this.configuration.realm
+        }))
   }
 
   async list(
@@ -334,33 +333,49 @@ export class KeycloakUserDirectoryAdapter
 
     if (scope.mode === 'account-ids' && scope.accountIds.length === 0) return { users: [], total: 0 }
 
-    const accessToken = await this.getServiceAccountAccessToken()
+    const adminClient = await this.getAuthenticatedAdminClient()
 
     return scope.mode === 'realm-wide'
-      ? this.listRealmUsers(query, accessToken)
-      : this.listUsersById(query, scope.accountIds, accessToken)
+      ? this.listRealmUsers(query, adminClient)
+      : this.listUsersById(query, scope.accountIds, adminClient)
   }
 
   async getById(accountId: string): Promise<DirectoryUser | null> {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(accountId)) return null
 
-    const accessToken = await this.getServiceAccountAccessToken()
-    const usersPath = `/admin/realms/${encodeURIComponent(this.configuration.realm)}/users`
+    const adminClient = await this.getAuthenticatedAdminClient()
 
-    const response = await this.fetchImplementation(
-      buildUrl(this.configuration, `${usersPath}/${encodeURIComponent(accountId)}`),
-      {
-        headers: {
-          accept: 'application/json',
-          authorization: `Bearer ${accessToken}`
-        }
-      }
+    const payload = await this.executeAdminRequest(() =>
+      adminClient.users.findOne({
+        realm: this.configuration.realm,
+        id: accountId
+      })
     )
 
-    if (response.status === 404) return null
-    if (!response.ok) throw new KeycloakUserDirectoryError('UPSTREAM_REQUEST_FAILED', response.status)
+    if (payload === null || payload === undefined) return null
 
-    return mapKeycloakUser(await parseJson(response))
+    return mapKeycloakUser(payload)
+  }
+
+  async isLocked(accountId: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]{1,128}$/.test(accountId)) {
+      throw new KeycloakUserDirectoryError('INVALID_UPSTREAM_RESPONSE')
+    }
+
+    const adminClient = await this.getAuthenticatedAdminClient()
+
+    const payload = await this.executeAdminRequest(() =>
+      adminClient.attackDetection.findOne({
+        realm: this.configuration.realm,
+        id: accountId
+      })
+    )
+
+    if (!isRecord(payload) || typeof payload.disabled !== 'boolean') {
+      throw new KeycloakUserDirectoryError('INVALID_UPSTREAM_RESPONSE')
+    }
+
+    return payload.disabled
   }
 
   /** Resolves every RG-37 fact from Keycloak Admin REST or returns unresolved. */
@@ -371,16 +386,14 @@ export class KeycloakUserDirectoryAdapter
 
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(user.id)) return null
 
-    let accessToken: string
+    let adminClient: KcAdminClient
 
     try {
-      accessToken = await this.getServiceAccountAccessToken()
+      adminClient = await this.getAuthenticatedAdminClient()
     } catch {
       return null
     }
 
-    const usersPath = `/admin/realms/${encodeURIComponent(this.configuration.realm)}/users`
-    const userPath = `${usersPath}/${encodeURIComponent(user.id)}`
     const facts = unresolvedProtectionFacts()
 
     // The username came from the preceding trusted Keycloak reload, so its service-account prefix
@@ -388,17 +401,21 @@ export class KeycloakUserDirectoryAdapter
     if (user.username.startsWith('service-account-')) facts.isServiceAccount = true
 
     const identityPromise = resolveFactSource(async () =>
-      readUserProtectionIdentity(await this.getAdminJson(userPath, accessToken), user)
+      readUserProtectionIdentity(
+        await adminClient.users.findOne({ realm: this.configuration.realm, id: user.id }),
+        user
+      )
     )
 
     const realmManagementRolesPromise = protectionConfiguration.realmManagement
       ? resolveFactSource(async () => {
-          const rolesPath =
-            `${userPath}/role-mappings/clients/` +
-            `${encodeURIComponent(protectionConfiguration.realmManagement!.clientUuid)}` +
-            '/composite?briefRepresentation=true'
-
-          const roleNames = readEffectiveRoleNames(await this.getAdminJson(rolesPath, accessToken))
+          const roleNames = readEffectiveRoleNames(
+            await adminClient.users.listCompositeClientRoleMappings({
+              realm: this.configuration.realm,
+              id: user.id,
+              clientUniqueId: protectionConfiguration.realmManagement!.clientUuid
+            })
+          )
 
           if (roleNames.length > 0) return true
 
@@ -407,42 +424,50 @@ export class KeycloakUserDirectoryAdapter
         })
       : Promise.resolve(null)
 
+    // An approved empty inventory conclusively falsifies only this fact and requires no role lookup.
     const realmAdministrationRolesPromise = protectionConfiguration.realmAdministration
-      ? resolveFactSource(async () => {
-          const rolesPath = `${userPath}/role-mappings/realm/composite?briefRepresentation=true`
-          const roleNames = readEffectiveRoleNames(await this.getAdminJson(rolesPath, accessToken))
+      ? protectionConfiguration.realmAdministration.roleNames.size === 0
+        ? Promise.resolve(false)
+        : resolveFactSource(async () => {
+            const roleNames = readEffectiveRoleNames(
+              await adminClient.users.listCompositeRealmRoleMappings({
+                realm: this.configuration.realm,
+                id: user.id
+              })
+            )
 
-          const hasApprovedAdministrationRole = roleNames.some(roleName =>
-            protectionConfiguration.realmAdministration!.roleNames.has(roleName)
-          )
+            const hasApprovedAdministrationRole = roleNames.some(roleName =>
+              protectionConfiguration.realmAdministration!.roleNames.has(roleName)
+            )
 
-          if (hasApprovedAdministrationRole) return true
+            if (hasApprovedAdministrationRole) return true
 
-          // Absence is trustworthy only after provisioning established complete realm-role visibility.
-          return protectionConfiguration.realmAdministration!.roleVisibilityValidated ? false : null
-        })
+            // Absence is trustworthy only after provisioning established complete realm-role visibility.
+            return protectionConfiguration.realmAdministration!.roleVisibilityValidated ? false : null
+          })
       : Promise.resolve(null)
 
     const groupMembershipPromise = protectionConfiguration.ssoAdministratorsGroupPath
       ? resolveFactSource(async () => {
-          const groupCount = readGroupCount(await this.getAdminJson(`${userPath}/groups/count`, accessToken))
+          const groupCount = readGroupCount(
+            await adminClient.users.countGroups({ realm: this.configuration.realm, id: user.id })
+          )
 
           if (groupCount > MAX_PROTECTION_GROUP_MEMBERSHIPS) throw invalidProtectionResponse()
 
-          const groupPaths = await this.getAllUserGroupPaths(userPath, groupCount, accessToken)
+          const groupPaths = await this.getAllUserGroupPaths(adminClient, user.id, groupCount)
           const administratorsPath = protectionConfiguration.ssoAdministratorsGroupPath!
 
           return groupPaths.some(path => path === administratorsPath || path.startsWith(`${administratorsPath}/`))
         })
       : Promise.resolve(null)
 
-    const [identityFacts, hasRealmManagementRole, hasRealmAdministrationRole, isGroupMember] =
-      await Promise.all([
-        identityPromise,
-        realmManagementRolesPromise,
-        realmAdministrationRolesPromise,
-        groupMembershipPromise
-      ])
+    const [identityFacts, hasRealmManagementRole, hasRealmAdministrationRole, isGroupMember] = await Promise.all([
+      identityPromise,
+      realmManagementRolesPromise,
+      realmAdministrationRolesPromise,
+      groupMembershipPromise
+    ])
 
     if (identityFacts) {
       facts.hasProtectedAttribute = identityFacts.hasProtectedAttribute
@@ -463,7 +488,6 @@ export class KeycloakUserDirectoryAdapter
 
     const hasApprovedRealmAdministrationRoleInventory =
       Array.isArray(realmAdministrationRoleNames) &&
-      realmAdministrationRoleNames.length > 0 &&
       realmAdministrationRoleNames.every(roleName => PROTECTION_ROLE_NAME_PATTERN.test(roleName))
 
     return {
@@ -479,8 +503,7 @@ export class KeycloakUserDirectoryAdapter
       realmAdministration: hasApprovedRealmAdministrationRoleInventory
         ? {
             roleNames: new Set(realmAdministrationRoleNames),
-            roleVisibilityValidated:
-              this.configuration.realmAdministrationRoleVisibilityValidated === true
+            roleVisibilityValidated: this.configuration.realmAdministrationRoleVisibilityValidated === true
           }
         : null,
       ssoAdministratorsGroupPath:
@@ -490,17 +513,19 @@ export class KeycloakUserDirectoryAdapter
     }
   }
 
-  private async getAllUserGroupPaths(userPath: string, groupCount: number, accessToken: string) {
+  private async getAllUserGroupPaths(adminClient: KcAdminClient, userId: string, groupCount: number) {
     const paths: string[] = []
 
     while (paths.length < groupCount) {
-      const parameters = new URLSearchParams({
-        briefRepresentation: 'true',
-        first: String(paths.length),
-        max: String(PROTECTION_GROUP_PAGE_SIZE)
-      })
-
-      const page = readGroupPaths(await this.getAdminJson(`${userPath}/groups?${parameters}`, accessToken))
+      const page = readGroupPaths(
+        await adminClient.users.listGroups({
+          realm: this.configuration.realm,
+          id: userId,
+          briefRepresentation: true,
+          first: paths.length,
+          max: PROTECTION_GROUP_PAGE_SIZE
+        })
+      )
 
       if (page.length === 0 || paths.length + page.length > groupCount) throw invalidProtectionResponse()
 
@@ -510,71 +535,55 @@ export class KeycloakUserDirectoryAdapter
     return paths
   }
 
-  private async getServiceAccountAccessToken() {
-    const tokenUrl = buildUrl(
-      this.configuration,
-      `/realms/${encodeURIComponent(this.configuration.realm)}/protocol/openid-connect/token`
-    )
+  private async getAuthenticatedAdminClient() {
+    const adminClient = this.adminClientFactory()
+    let accessToken: string | undefined
 
-    const response = await this.fetchImplementation(tokenUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'client_credentials',
-        client_id: this.configuration.clientId,
-        client_secret: this.configuration.clientSecret
+    try {
+      await adminClient.auth({
+        grantType: 'client_credentials',
+        clientId: this.configuration.clientId,
+        clientSecret: this.configuration.clientSecret
       })
-    })
-
-    if (!response.ok) {
-      throw new KeycloakUserDirectoryError('SERVICE_ACCOUNT_AUTHENTICATION_FAILED', response.status)
+      accessToken = await adminClient.getAccessToken()
+    } catch (error) {
+      throw new KeycloakUserDirectoryError('SERVICE_ACCOUNT_AUTHENTICATION_FAILED', readSdkStatus(error))
     }
 
-    const payload = await parseJson(response)
-
-    if (!isRecord(payload) || typeof payload.access_token !== 'string' || !payload.access_token) {
-      throw new KeycloakUserDirectoryError('INVALID_UPSTREAM_RESPONSE', response.status)
+    if (typeof accessToken !== 'string' || !accessToken) {
+      throw new KeycloakUserDirectoryError('INVALID_UPSTREAM_RESPONSE')
     }
 
-    return payload.access_token
+    return adminClient
   }
 
-  private async getAdminJson(path: string, accessToken: string): Promise<unknown> {
-    const response = await this.fetchImplementation(buildUrl(this.configuration, path), {
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${accessToken}`
-      }
-    })
-
-    if (!response.ok) throw new KeycloakUserDirectoryError('UPSTREAM_REQUEST_FAILED', response.status)
-
-    return parseJson(response)
+  private async executeAdminRequest<Value>(request: () => Promise<Value>) {
+    try {
+      return await request()
+    } catch (error) {
+      throw new KeycloakUserDirectoryError('UPSTREAM_REQUEST_FAILED', readSdkStatus(error))
+    }
   }
 
   private async listRealmUsers(
     query: ValidatedListUsersQuery,
-    accessToken: string
+    adminClient: KcAdminClient
   ): Promise<UserDirectoryPage<DirectoryUser>> {
-    const usersUrl = `/admin/realms/${encodeURIComponent(this.configuration.realm)}/users`
-
-    const listParameters = new URLSearchParams({
-      first: String(query.offset),
-      max: String(query.pageSize),
-      briefRepresentation: 'true'
-    })
-
-    const countParameters = new URLSearchParams()
-
-    if (query.search) {
-      listParameters.set('search', query.search)
-      countParameters.set('search', query.search)
-    }
-
-    const [usersPayload, totalPayload] = await Promise.all([
-      this.getAdminJson(`${usersUrl}?${listParameters}`, accessToken),
-      this.getAdminJson(`${usersUrl}/count${countParameters.size ? `?${countParameters}` : ''}`, accessToken)
-    ])
+    const [usersPayload, totalPayload] = await this.executeAdminRequest(() =>
+      Promise.all([
+        adminClient.users.find({
+          realm: this.configuration.realm,
+          first: query.offset,
+          max: query.pageSize,
+          briefRepresentation: true,
+          ...(query.search ? { search: query.search } : {})
+        }),
+        adminClient.users.count({
+          realm: this.configuration.realm,
+          ...(query.search ? { search: query.search } : {})
+        })
+      ])
+    )
 
     if (
       !Array.isArray(usersPayload) ||
@@ -594,17 +603,20 @@ export class KeycloakUserDirectoryAdapter
   private async listUsersById(
     query: ValidatedListUsersQuery,
     accountIds: readonly string[],
-    accessToken: string
+    adminClient: KcAdminClient
   ): Promise<UserDirectoryPage<DirectoryUser>> {
-    const usersPath = `/admin/realms/${encodeURIComponent(this.configuration.realm)}/users`
-
-    const users = await Promise.all(
-      accountIds.map(async accountId => {
-        const payload = await this.getAdminJson(`${usersPath}/${encodeURIComponent(accountId)}`, accessToken)
-
-        return mapKeycloakUser(payload)
-      })
+    const usersPayload = await this.executeAdminRequest(() =>
+      Promise.all(
+        accountIds.map(accountId =>
+          adminClient.users.findOne({
+            realm: this.configuration.realm,
+            id: accountId
+          })
+        )
+      )
     )
+
+    const users = usersPayload.map(mapKeycloakUser)
 
     const search = query.search
     const matchingUsers = search ? users.filter(user => matchesSearch(user, search)) : users

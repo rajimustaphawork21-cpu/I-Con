@@ -289,9 +289,7 @@ const isTrustedUser = (value: unknown): value is TrustedUserTarget => {
   )
 }
 
-export const isProtectedUserAccount = (
-  user: Pick<TrustedUserTarget, 'username' | 'protection'>
-) =>
+export const isProtectedUserAccount = (user: Pick<TrustedUserTarget, 'username' | 'protection'>) =>
   user.username.startsWith('service-account-') ||
   user.protection.hasRealmManagementRole ||
   user.protection.hasRealmAdministrationRole ||
@@ -468,8 +466,8 @@ const authorizeGroup = (
   return null
 }
 
-/** Exact, server-side, default-deny Lot 1 authorization policy (CDCF RG-00). */
-export const authorizeLot1 = (request: Lot1AuthorizationRequest): AuthorizationDecision => {
+/** Target-independent operation check used before any trusted target is loaded. */
+export const authorizeLot1Operation = (request: Lot1AuthorizationRequest): AuthorizationDecision => {
   if (!KNOWN_ACTIONS.has(request.action)) return deny('UNKNOWN_ACTION', 'RG-42')
   if (!request.operator) return deny('UNAUTHENTICATED', 'RG-00')
   if (!isTrustedOperator(request.operator)) return deny('INVALID_OPERATOR_CONTEXT', 'RG-00', 'RG-41')
@@ -491,8 +489,20 @@ export const authorizeLot1 = (request: Lot1AuthorizationRequest): AuthorizationD
     return deny('ACTION_NOT_ALLOWED', 'CDCF-2.2', 'RG-00')
   }
 
+  return allow('CDCF-2.2', 'RG-00')
+}
+
+/** Exact, server-side, default-deny Lot 1 authorization policy (CDCF RG-00). */
+export const authorizeLot1 = (request: Lot1AuthorizationRequest): AuthorizationDecision => {
+  const operationDecision = authorizeLot1Operation(request)
+
+  if (!operationDecision.allowed) return operationDecision
+
+  const action = request.action as Lot1Action
+  const operator = request.operator!
+
   if (action === LOT1_ACTIONS.userRead) {
-    return allow('CDCF-2.2', 'RG-00')
+    return operationDecision
   }
 
   if (action === LOT1_ACTIONS.userSessionRead) {

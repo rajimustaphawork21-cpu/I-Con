@@ -1,7 +1,7 @@
 'use client'
 
 // React Imports
-import { useEffect, useState } from 'react'
+import { useEffect, useReducer, useState } from 'react'
 
 // Next Imports
 import Link from 'next/link'
@@ -15,24 +15,41 @@ import CardContent from '@mui/material/CardContent'
 import Chip from '@mui/material/Chip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Divider from '@mui/material/Divider'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogContentText from '@mui/material/DialogContentText'
+import DialogTitle from '@mui/material/DialogTitle'
+import Tab from '@mui/material/Tab'
 import Typography from '@mui/material/Typography'
+
+// MUI Lab Imports
+import TabContext from '@mui/lab/TabContext'
+import TabPanel from '@mui/lab/TabPanel'
+
+// Component Imports
+import CustomTabList from '@core/components/mui/TabList'
 
 // User Imports
 import {
+  INITIAL_SIMULATED_UNLOCK_STATE,
   buildUserDetailRequestUrl,
   getUserDetailErrorKind,
+  loadSimulatedUnlockCapability,
+  reduceSimulatedUnlockUiState,
   parseUserIdentity
 } from '@/modules/users/presentation/user-detail'
-import type { UserDetailErrorKind, UserIdentityDto } from '@/modules/users/presentation/user-detail'
+import type {
+  SimulatedUnlockCapabilityDto,
+  UserDetailErrorKind,
+  UserIdentityDto
+} from '@/modules/users/presentation/user-detail'
 
 type UserIdentityProps = {
   userId: string
 }
 
-const ERROR_CONTENT: Record<
-  UserDetailErrorKind,
-  { severity: 'error' | 'warning'; title: string; message: string }
-> = {
+const ERROR_CONTENT: Record<UserDetailErrorKind, { severity: 'error' | 'warning'; title: string; message: string }> = {
   'session-expired': {
     severity: 'warning',
     title: 'Session expirée',
@@ -79,6 +96,14 @@ const UserIdentity = ({ userId }: UserIdentityProps) => {
   const [loading, setLoading] = useState(true)
   const [errorKind, setErrorKind] = useState<UserDetailErrorKind | null>(null)
   const [retry, setRetry] = useState(0)
+  const [activeTab, setActiveTab] = useState<'identity' | 'security'>('identity')
+  const [demoCapability, setDemoCapability] = useState<SimulatedUnlockCapabilityDto | null>(null)
+  const [demoLoading, setDemoLoading] = useState(false)
+
+  const [simulatedUnlock, dispatchSimulatedUnlock] = useReducer(
+    reduceSimulatedUnlockUiState,
+    INITIAL_SIMULATED_UNLOCK_STATE
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -124,6 +149,34 @@ const UserIdentity = ({ userId }: UserIdentityProps) => {
 
     return () => controller.abort()
   }, [retry, userId])
+
+  useEffect(() => {
+    if (!user) {
+      setDemoCapability(null)
+      setDemoLoading(false)
+
+      return
+    }
+
+    const controller = new AbortController()
+
+    const loadCapability = async () => {
+      setDemoLoading(true)
+      setDemoCapability(null)
+
+      const capability = await loadSimulatedUnlockCapability(user.id, fetch, controller.signal)
+
+      if (controller.signal.aborted) return
+
+      setDemoCapability(capability)
+      dispatchSimulatedUnlock({ type: 'reset', locked: capability?.simulatedLocked === true })
+      setDemoLoading(false)
+    }
+
+    void loadCapability()
+
+    return () => controller.abort()
+  }, [user])
 
   const errorContent = errorKind ? ERROR_CONTENT[errorKind] : null
 
@@ -183,30 +236,141 @@ const UserIdentity = ({ userId }: UserIdentityProps) => {
 
       {!loading && !errorKind && user ? (
         <Card>
-          <CardContent className='flex flex-col gap-5'>
-            <Box className='flex flex-wrap items-center justify-between gap-3'>
-              <div>
-                <Typography variant='h5'>{user.username}</Typography>
-                <Typography color='text.secondary'>Compte utilisateur</Typography>
-              </div>
-              <Chip
-                variant='tonal'
-                color={user.enabled ? 'success' : 'secondary'}
-                label={user.enabled ? 'Compte activé' : 'Compte désactivé'}
-              />
-            </Box>
+          <CardContent>
+            <TabContext value={activeTab}>
+              <CustomTabList
+                onChange={(_event, value) => setActiveTab(value as 'identity' | 'security')}
+                aria-label='Sections de la fiche utilisateur'
+              >
+                <Tab
+                  value='identity'
+                  label='Identité'
+                  icon={<i className='tabler-user' aria-hidden='true' />}
+                  iconPosition='start'
+                />
+                <Tab
+                  value='security'
+                  label='Sécurité'
+                  icon={<i className='tabler-shield-lock' aria-hidden='true' />}
+                  iconPosition='start'
+                />
+              </CustomTabList>
 
-            <Divider />
+              <TabPanel value='identity'>
+                <Box className='flex flex-col gap-5'>
+                  <Box className='flex flex-wrap items-center justify-between gap-3'>
+                    <div>
+                      <Typography variant='h5'>{user.username}</Typography>
+                      <Typography color='text.secondary'>Compte utilisateur</Typography>
+                    </div>
+                    <Chip
+                      variant='tonal'
+                      color={user.enabled ? 'success' : 'secondary'}
+                      label={user.enabled ? 'Compte activé' : 'Compte désactivé'}
+                    />
+                  </Box>
 
-            <Box className='grid grid-cols-1 gap-5 sm:grid-cols-2'>
-              <IdentityField label='Identifiant' value={user.username} />
-              {user.firstName ? <IdentityField label='Prénom' value={user.firstName} /> : null}
-              {user.lastName ? <IdentityField label='Nom' value={user.lastName} /> : null}
-              {user.email ? <IdentityField label='E-mail' value={user.email} /> : null}
-            </Box>
+                  <Divider />
+
+                  <Box className='grid grid-cols-1 gap-5 sm:grid-cols-2'>
+                    <IdentityField label='Identifiant' value={user.username} />
+                    {user.firstName ? <IdentityField label='Prénom' value={user.firstName} /> : null}
+                    {user.lastName ? <IdentityField label='Nom' value={user.lastName} /> : null}
+                    {user.email ? <IdentityField label='E-mail' value={user.email} /> : null}
+                  </Box>
+                </Box>
+              </TabPanel>
+
+              <TabPanel value='security'>
+                <Box className='flex flex-col gap-5'>
+                  <Box className='flex flex-wrap items-start justify-between gap-3'>
+                    <div>
+                      <Typography variant='h5'>Sécurité du compte</Typography>
+                      <Typography color='text.secondary' className='mbs-1'>
+                        Démonstration locale du parcours de déblocage.
+                      </Typography>
+                    </div>
+                    <Chip variant='tonal' color='info' label='Simulation locale' />
+                  </Box>
+
+                  <Alert severity='info'>
+                    Aucun appel d’écriture n’est envoyé à Keycloak. L’état affiché dans cet onglet est simulé et
+                    distinct de l’état de verrouillage réel du compte.
+                  </Alert>
+
+                  {demoLoading ? (
+                    <Box className='flex items-center gap-3' role='status'>
+                      <CircularProgress size={24} />
+                      <Typography color='text.secondary'>Vérification de l’éligibilité de la simulation…</Typography>
+                    </Box>
+                  ) : null}
+
+                  {!demoLoading && demoCapability?.enabled && demoCapability.eligible ? (
+                    <Box className='flex flex-col gap-4 rounded border border-solid p-5' sx={{ borderColor: 'divider' }}>
+                      <Box className='flex flex-wrap items-center justify-between gap-3'>
+                        <div>
+                          <Typography className='font-medium'>État de verrouillage simulé</Typography>
+                          <Typography variant='body2' color='text.secondary'>
+                            Compte de démonstration uniquement
+                          </Typography>
+                        </div>
+                        <Chip
+                          variant='tonal'
+                          color={simulatedUnlock.locked ? 'warning' : 'success'}
+                          label={simulatedUnlock.locked ? 'Verrouillé (simulation)' : 'Débloqué (simulation)'}
+                        />
+                      </Box>
+
+                      {simulatedUnlock.feedback ? <Alert severity='success'>{simulatedUnlock.feedback}</Alert> : null}
+
+                      {simulatedUnlock.locked ? (
+                        <Box>
+                          <Button
+                            variant='contained'
+                            color='warning'
+                            startIcon={<i className='tabler-lock-open' aria-hidden='true' />}
+                            onClick={() => dispatchSimulatedUnlock({ type: 'open-confirmation' })}
+                          >
+                            Débloquer (simulation)
+                          </Button>
+                        </Box>
+                      ) : null}
+                    </Box>
+                  ) : null}
+
+                  {!demoLoading && (!demoCapability?.enabled || !demoCapability.eligible) ? (
+                    <Alert severity='warning'>
+                      La démonstration de déblocage n’est pas disponible pour cet opérateur ou ce compte.
+                    </Alert>
+                  ) : null}
+                </Box>
+              </TabPanel>
+            </TabContext>
           </CardContent>
         </Card>
       ) : null}
+
+      <Dialog
+        open={simulatedUnlock.confirmationOpen}
+        onClose={() => dispatchSimulatedUnlock({ type: 'cancel' })}
+        aria-labelledby='simulated-unlock-dialog-title'
+      >
+        <DialogTitle id='simulated-unlock-dialog-title'>Confirmer le déblocage simulé</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Confirmez-vous le déblocage simulé de ce compte ? Cette action modifie uniquement l’état local de la
+            démonstration. Le compte Keycloak reste inchangé.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button color='secondary' onClick={() => dispatchSimulatedUnlock({ type: 'cancel' })}>
+            Annuler
+          </Button>
+          <Button variant='contained' color='warning' onClick={() => dispatchSimulatedUnlock({ type: 'confirm' })}>
+            Confirmer le déblocage simulé
+          </Button>
+        </DialogActions>
+      </Dialog>
     </div>
   )
 }
