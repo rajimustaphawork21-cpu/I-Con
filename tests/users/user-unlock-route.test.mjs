@@ -5,7 +5,7 @@ import unlockUseCaseModule from '../../src/modules/users/application/unlock-user
 import detailRouteHandlerModule from '../../src/app/api/users/[id]/route-handler.ts'
 import unlockRouteHandlerModule from '../../src/app/api/users/[id]/unlock/route-handler.ts'
 
-const { UnlockUserUseCase } = unlockUseCaseModule
+const { UnlockUserUseCase, UserUnlockDispatchOutcomeUnknownError } = unlockUseCaseModule
 const { isKeycloakAccountIdInScope } = detailRouteHandlerModule
 const { createUserUnlockPostHandler } = unlockRouteHandlerModule
 
@@ -47,35 +47,76 @@ const approvedScope = accountIds => ({
 
 class TestAuditCoordinator {
   events = []
+  appendRequests = []
 
   constructor(mode = 'available') {
     this.mode = mode
   }
 
   async record(event) {
+    this.appendRequests.push(event)
     this.events.push(event)
   }
 
   async execute(context, operation) {
-    if (this.mode === 'unavailable') return { outcome: 'unavailable' }
+    const attempt = {
+      ...context,
+      outcome: 'attempt',
+      code: 'USER_UNLOCK_ATTEMPT',
+      severity: 'information'
+    }
+
+    this.appendRequests.push(attempt)
+
+    if (this.mode === 'attempt-unavailable') {
+      return { outcome: 'unavailable', reason: 'ATTEMPT_NOT_CONFIRMED' }
+    }
+
+    this.events.push(attempt)
 
     try {
       await operation()
-      this.events.push({
+
+      const success = {
         ...context,
         outcome: 'success',
         code: 'USER_UNLOCKED',
         severity: 'information'
-      })
+      }
+
+      this.appendRequests.push(success)
+
+      if (this.mode === 'terminal-ack-lost') {
+        return { outcome: 'unknown', reason: 'TERMINAL_AUDIT_NOT_CONFIRMED' }
+      }
+
+      this.events.push(success)
 
       return { outcome: 'success' }
-    } catch {
-      this.events.push({
+    } catch (error) {
+      if (error instanceof UserUnlockDispatchOutcomeUnknownError) {
+        const unknown = {
+          ...context,
+          outcome: 'unknown',
+          code: 'USER_UNLOCK_OUTCOME_UNKNOWN',
+          severity: 'alert'
+        }
+
+        this.appendRequests.push(unknown)
+        this.events.push(unknown)
+
+        return { outcome: 'unknown', reason: 'KEYCLOAK_OUTCOME_AMBIGUOUS' }
+      }
+
+      const failure = {
         ...context,
         outcome: 'failure',
         code: 'USER_UNLOCK_FAILED',
         severity: 'information'
-      })
+      }
+
+      this.appendRequests.push(failure)
+      this.events.push(failure)
 
       return { outcome: 'failure' }
     }
@@ -89,7 +130,7 @@ const createTestRoute = ({
   protection = unprotected,
   isLocked = true,
   auditCoordinator = new TestAuditCoordinator(),
-  writeFails = false
+  writeOutcome = 'success'
 } = {}) => {
   const calls = []
   const directoryCalls = []
@@ -128,7 +169,8 @@ const createTestRoute = ({
         calls.push('write')
         writeCalls.push(accountId)
 
-        if (writeFails) throw new Error('sanitized upstream failure')
+        if (writeOutcome === 'unknown') throw new UserUnlockDispatchOutcomeUnknownError()
+        if (writeOutcome === 'failure') throw new Error('sanitized upstream failure')
       }
     },
     ...(auditCoordinator ? { auditCoordinator } : {})
@@ -173,6 +215,15 @@ test('an eligible confirmed unlock reloads and rechecks the target before one au
   assert.deepEqual(fixture.calls, ['reload', 'protection', 'lock', 'write'])
   assert.deepEqual(fixture.writeCalls, ['user-1'])
   assert.deepEqual(fixture.auditCoordinator.events, [
+    {
+      correlationId: 'correlation-1',
+      operatorSubject: 'operator-1',
+      targetUserId: 'user-1',
+      action: 'user:unlock',
+      outcome: 'attempt',
+      code: 'USER_UNLOCK_ATTEMPT',
+      severity: 'information'
+    },
     {
       correlationId: 'correlation-1',
       operatorSubject: 'operator-1',
@@ -292,7 +343,7 @@ test(
   }
 )
 
-test('missing or unavailable durable audit never invokes the Keycloak write', async () => {
+test('missing audit refuses the operation before target reads or a Keycloak write', async () => {
   const missingAudit = createTestRoute({ auditCoordinator: null })
   const missingAuditResponse = await missingAudit.post('user-1')
 
@@ -300,24 +351,79 @@ test('missing or unavailable durable audit never invokes the Keycloak write', as
   assert.deepEqual(await missingAuditResponse.json(), { error: 'USER_UNLOCK_AUDIT_UNAVAILABLE' })
   assert.deepEqual(missingAudit.directoryCalls, [])
   assert.deepEqual(missingAudit.writeCalls, [])
+})
 
-  const unavailableAudit = createTestRoute({
-    auditCoordinator: new TestAuditCoordinator('unavailable')
+test('an unconfirmed ATTEMPT returns audit unavailable and never dispatches the Keycloak write', async () => {
+  const auditCoordinator = new TestAuditCoordinator('attempt-unavailable')
+  const fixture = createTestRoute({ auditCoordinator })
+  const response = await fixture.post('user-1')
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), { error: 'USER_UNLOCK_AUDIT_UNAVAILABLE' })
+  assert.deepEqual(fixture.writeCalls, [])
+  assert.deepEqual(auditCoordinator.events, [])
+  assert.deepEqual(
+    auditCoordinator.appendRequests.map(event => event.outcome),
+    ['attempt']
+  )
+})
+
+test('an ambiguous post-dispatch Keycloak outcome returns UNKNOWN and requests an UNKNOWN audit event', async () => {
+  const fixture = createTestRoute({ writeOutcome: 'unknown' })
+  const response = await fixture.post('user-1')
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), {
+    error: 'USER_UNLOCK_OUTCOME_UNKNOWN',
+    correlationId: 'correlation-1'
   })
-  const unavailableAuditResponse = await unavailableAudit.post('user-1')
+  assert.equal(response.headers.get('x-correlation-id'), 'correlation-1')
+  assert.deepEqual(fixture.writeCalls, ['user-1'])
+  assert.deepEqual(
+    fixture.auditCoordinator.events.map(event => event.outcome),
+    ['attempt', 'unknown']
+  )
+  assert.equal(fixture.auditCoordinator.events.at(-1).code, 'USER_UNLOCK_OUTCOME_UNKNOWN')
+  assert.equal(fixture.auditCoordinator.events.at(-1).correlationId, 'correlation-1')
+})
 
-  assert.equal(unavailableAuditResponse.status, 503)
-  assert.deepEqual(await unavailableAuditResponse.json(), { error: 'USER_UNLOCK_AUDIT_UNAVAILABLE' })
-  assert.deepEqual(unavailableAudit.writeCalls, [])
+test('a lost terminal-success acknowledgement returns UNKNOWN without appending a competing terminal event', async () => {
+  const auditCoordinator = new TestAuditCoordinator('terminal-ack-lost')
+  const fixture = createTestRoute({ auditCoordinator })
+  const response = await fixture.post('user-1')
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(await response.json(), {
+    error: 'USER_UNLOCK_OUTCOME_UNKNOWN',
+    correlationId: 'correlation-1'
+  })
+  assert.equal(response.headers.get('x-correlation-id'), 'correlation-1')
+  assert.deepEqual(fixture.writeCalls, ['user-1'])
+  assert.deepEqual(
+    auditCoordinator.events.map(event => event.outcome),
+    ['attempt']
+  )
+  assert.deepEqual(
+    auditCoordinator.appendRequests.map(event => event.outcome),
+    ['attempt', 'success']
+  )
+  assert.equal(
+    auditCoordinator.appendRequests.some(event => event.outcome === 'unknown'),
+    false
+  )
 })
 
 test('a failed Keycloak write returns a sanitized error and records failure', async () => {
-  const fixture = createTestRoute({ writeFails: true })
+  const fixture = createTestRoute({ writeOutcome: 'failure' })
   const response = await fixture.post('user-1')
 
   assert.equal(response.status, 502)
   assert.deepEqual(await response.json(), { error: 'USER_UNLOCK_FAILED' })
   assert.deepEqual(fixture.writeCalls, ['user-1'])
+  assert.deepEqual(
+    fixture.auditCoordinator.events.map(event => event.outcome),
+    ['attempt', 'failure']
+  )
   assert.equal(fixture.auditCoordinator.events.at(-1).outcome, 'failure')
   assert.equal(fixture.auditCoordinator.events.at(-1).code, 'USER_UNLOCK_FAILED')
   assert.ok(!JSON.stringify(fixture.auditCoordinator.events).includes('sanitized upstream failure'))

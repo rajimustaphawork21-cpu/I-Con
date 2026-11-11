@@ -55,11 +55,24 @@ export type UserUnlockAuditEvent = UserUnlockAuditBase & {
 export type UserUnlockAuditExecutionResult =
   | { outcome: 'success' }
   | { outcome: 'failure' }
-  | { outcome: 'unavailable' }
+  | { outcome: 'unavailable'; reason: 'ATTEMPT_NOT_CONFIRMED' }
+  | {
+      outcome: 'unknown'
+      reason: 'KEYCLOAK_OUTCOME_AMBIGUOUS' | 'TERMINAL_AUDIT_NOT_CONFIRMED'
+    }
 
 /**
- * A production implementation must durably append the final success/failure result and must not
- * invoke `operation` when the append-only path cannot uphold RG-46 and RG-47.
+ * A production implementation owns the RG-46 boundary around `operation`:
+ *
+ * - durably append and confirm ATTEMPT before invoking `operation`;
+ * - never invoke `operation` when ATTEMPT cannot be confirmed;
+ * - invoke `operation` exactly once;
+ * - append a definitive terminal result when Keycloak confirms one;
+ * - request UNKNOWN when dispatch occurred but Keycloak's result is ambiguous;
+ * - return UNKNOWN without blindly appending a competing terminal event when a successful
+ *   terminal append may exist but its acknowledgement was lost.
+ *
+ * The append-only store must use the correlation ID as an idempotency/reconciliation key.
  */
 export interface UserUnlockAuditCoordinator {
   record(event: UserUnlockAuditEvent): Promise<void>
@@ -120,6 +133,23 @@ export class UnlockUserAuditUnavailableError extends Error {
   constructor() {
     super('Durable user-unlock auditing is unavailable')
     this.name = 'UnlockUserAuditUnavailableError'
+  }
+}
+
+/** The write was dispatched, but Keycloak did not provide a definitive outcome. */
+export class UserUnlockDispatchOutcomeUnknownError extends Error {
+  constructor() {
+    super('Keycloak user unlock dispatch outcome is unknown')
+    this.name = 'UserUnlockDispatchOutcomeUnknownError'
+  }
+}
+
+export class UnlockUserOutcomeUnknownError extends Error {
+  readonly code = 'USER_UNLOCK_OUTCOME_UNKNOWN'
+
+  constructor() {
+    super('Keycloak user unlock outcome is unknown')
+    this.name = 'UnlockUserOutcomeUnknownError'
   }
 }
 
@@ -318,16 +348,27 @@ export class UnlockUserUseCase<TUser extends UserIdentity, TScope extends object
     }
 
     let result: UserUnlockAuditExecutionResult
+    let writeDispatched = false
 
     try {
-      result = await this.auditCoordinator.execute(this.auditBase(trusted, user.id), () =>
-        this.unlocker.unlock(user.id)
-      )
+      result = await this.auditCoordinator.execute(this.auditBase(trusted, user.id), async () => {
+        if (writeDispatched) throw new UnlockUserOutcomeUnknownError()
+
+        writeDispatched = true
+        await this.unlocker.unlock(user.id)
+      })
     } catch {
+      if (writeDispatched) throw new UnlockUserOutcomeUnknownError()
+
       throw new UnlockUserAuditUnavailableError()
     }
 
-    if (result.outcome === 'unavailable') throw new UnlockUserAuditUnavailableError()
+    if (!writeDispatched) throw new UnlockUserAuditUnavailableError()
+
+    if (result.outcome === 'unavailable' || result.outcome === 'unknown') {
+      throw new UnlockUserOutcomeUnknownError()
+    }
+
     if (result.outcome === 'failure') throw new UnlockUserOperationFailedError()
 
     return { id: user.id }

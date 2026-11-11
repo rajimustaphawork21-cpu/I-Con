@@ -13,6 +13,7 @@ import {
   UnlockUserLockStatusUnavailableError,
   UnlockUserNotFoundError,
   UnlockUserOperationFailedError,
+  UnlockUserOutcomeUnknownError,
   UnlockUserProtectionUnavailableError
 } from '@/modules/users/application/unlock-user.usecase'
 import type { TrustedUnlockUserContext, UnlockUserRequest } from '@/modules/users/application/unlock-user.usecase'
@@ -143,6 +144,10 @@ export const createUserUnlockPostHandler =
 
       if (error instanceof UnlockUserNotFoundError) {
         return json({ error: error.code }, 404, correlationId)
+      }
+
+      if (error instanceof UnlockUserOutcomeUnknownError) {
+        return json({ error: error.code, correlationId }, 503, correlationId)
       }
 
       if (
