@@ -137,6 +137,15 @@ test('GET /api/users/[id] returns an allowlisted identity DTO for an authorized 
   assert.deepEqual(getProtectionCalls(), ['user-1'])
 })
 
+test('AUD can still read user details inside its authorized scope', async () => {
+  const { directory, get } = createTestRoute({ currentSession: session(['AUD']) })
+  const response = await get('user-1')
+
+  assert.equal(response.status, 200)
+  assert.equal((await response.json()).id, 'user-1')
+  assert.deepEqual(directory.calls, ['user-1'])
+})
+
 test('a changed ID outside the trusted scope returns the same 404 without reaching Keycloak', async () => {
   const { directory, get, getProtectionCalls } = createTestRoute()
   const response = await get('user-2')

@@ -3,6 +3,9 @@ import 'server-only'
 // Third-party Imports
 import KcAdminClient, { NetworkError } from '@keycloak/keycloak-admin-client'
 
+// User Imports
+import { UserUnlockDispatchOutcomeUnknownError } from '@/modules/users/application/unlock-user.usecase'
+
 export type KeycloakUserUnlockConfiguration = {
   adminBaseUrl: string
   realm: string
@@ -15,10 +18,16 @@ export type KeycloakUserUnlockErrorCode =
   | 'SERVICE_ACCOUNT_AUTHENTICATION_FAILED'
   | 'UPSTREAM_REQUEST_FAILED'
 
+export type KeycloakUserUnlockStage =
+  | 'configuration'
+  | 'service_account_token'
+  | 'attack_detection_delete'
+
 export class KeycloakUserUnlockError extends Error {
   constructor(
     readonly code: KeycloakUserUnlockErrorCode,
-    readonly status?: number
+    readonly status?: number,
+    readonly stage?: KeycloakUserUnlockStage
   ) {
     super('Keycloak user unlock request failed')
     this.name = 'KeycloakUserUnlockError'
@@ -82,7 +91,23 @@ const normalizeConfiguration = (configuration: KeycloakUserUnlockConfiguration):
   return { ...normalized, adminBaseUrl: adminUrl.toString().replace(/\/$/, '') }
 }
 
-const readSdkStatus = (error: unknown) => (error instanceof NetworkError ? error.response.status : undefined)
+const readSdkStatus = (error: unknown) => {
+  if (error instanceof NetworkError) return error.response.status
+
+  if (
+    error &&
+    typeof error === 'object' &&
+    'response' in error &&
+    error.response &&
+    typeof error.response === 'object' &&
+    'status' in error.response &&
+    typeof error.response.status === 'number'
+  ) {
+    return error.response.status
+  }
+
+  return undefined
+}
 
 export class KeycloakUserUnlockAdapter {
   private readonly configuration: KeycloakUserUnlockConfiguration
@@ -101,7 +126,7 @@ export class KeycloakUserUnlockAdapter {
 
   async unlock(accountId: string): Promise<void> {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(accountId)) {
-      throw new KeycloakUserUnlockError('UPSTREAM_REQUEST_FAILED')
+      throw new KeycloakUserUnlockError('UPSTREAM_REQUEST_FAILED', undefined, 'attack_detection_delete')
     }
 
     const adminClient = await this.getAuthenticatedAdminClient()
@@ -112,7 +137,13 @@ export class KeycloakUserUnlockAdapter {
         id: accountId
       })
     } catch (error) {
-      throw new KeycloakUserUnlockError('UPSTREAM_REQUEST_FAILED', readSdkStatus(error))
+      const status = readSdkStatus(error)
+
+      if (status === undefined || status >= 500) {
+        throw new UserUnlockDispatchOutcomeUnknownError()
+      }
+
+      throw new KeycloakUserUnlockError('UPSTREAM_REQUEST_FAILED', status, 'attack_detection_delete')
     }
   }
 
@@ -128,11 +159,19 @@ export class KeycloakUserUnlockAdapter {
       })
       accessToken = await adminClient.getAccessToken()
     } catch (error) {
-      throw new KeycloakUserUnlockError('SERVICE_ACCOUNT_AUTHENTICATION_FAILED', readSdkStatus(error))
+      throw new KeycloakUserUnlockError(
+        'SERVICE_ACCOUNT_AUTHENTICATION_FAILED',
+        readSdkStatus(error),
+        'service_account_token'
+      )
     }
 
     if (typeof accessToken !== 'string' || !accessToken) {
-      throw new KeycloakUserUnlockError('SERVICE_ACCOUNT_AUTHENTICATION_FAILED')
+      throw new KeycloakUserUnlockError(
+        'SERVICE_ACCOUNT_AUTHENTICATION_FAILED',
+        undefined,
+        'service_account_token'
+      )
     }
 
     return adminClient

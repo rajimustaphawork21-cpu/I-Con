@@ -1,7 +1,7 @@
 import 'server-only'
 
 // Auth Imports
-import { PORTAL_CLIENT_ID, PORTAL_CLIENT_ROLES } from '@/libs/auth/claims'
+import { PORTAL_CLIENT_ID, PORTAL_CLIENT_ROLES, getPortalClientRoles } from '@/libs/auth/claims'
 import type { PortalClientRole } from '@/libs/auth/claims'
 
 /**
@@ -26,6 +26,10 @@ export const LOT1_ACTIONS = {
   roleRevoke: 'role:revoke',
   groupAssign: 'group:assign',
   groupRevoke: 'group:revoke'
+} as const
+
+export const AUDIT_ACTIONS = {
+  unlockReconcile: 'audit:unlock:reconcile'
 } as const
 
 export type Lot1Action = (typeof LOT1_ACTIONS)[keyof typeof LOT1_ACTIONS]
@@ -134,6 +138,7 @@ export type Lot1AuthorizationRequest = {
 export type AuthorizationRule =
   | 'CDCF-2.2'
   | 'DEC-AUTH-001'
+  | 'DEC-AUDIT-RECON-001'
   | 'RG-00'
   | 'RG-02'
   | 'RG-13'
@@ -159,6 +164,7 @@ export type AuthorizationDenialReason =
   | 'PORTAL_ROLE_REQUIRED'
   | 'SINGLE_PORTAL_ROLE_REQUIRED'
   | 'ACTION_NOT_ALLOWED'
+  | 'PERMISSION_REQUIRED'
   | 'MISSING_TRUSTED_TARGET'
   | 'PROTECTED_ACCOUNT'
   | 'SELF_CHANGE_FORBIDDEN'
@@ -181,6 +187,18 @@ export type AuthorizationDenialReason =
 export type AuthorizationDecision =
   | { allowed: true; rules: readonly AuthorizationRule[] }
   | { allowed: false; reason: AuthorizationDenialReason; rules: readonly AuthorizationRule[] }
+
+export type TrustedAuditReviewerContext = {
+
+  /** Authenticated Keycloak subject from the Auth.js session. */
+  subject: string
+
+  /** Exact validated portal roles; DEC-AUTH-001 continues to apply. */
+  roles: readonly string[]
+
+  /** Separately allowlisted icon-bff permissions. */
+  permissions: readonly string[]
+}
 
 const ALL_PORTAL_ROLES: readonly PortalClientRole[] = PORTAL_CLIENT_ROLES
 const USER_OPERATOR_ROLES: readonly PortalClientRole[] = ['OPS-N1', 'ADM-APP', 'ADM-CONSOLE']
@@ -251,6 +269,19 @@ const deny = (reason: AuthorizationDenialReason, ...rules: AuthorizationRule[]):
 
 const isStringArray = (value: unknown): value is readonly string[] =>
   Array.isArray(value) && value.every(item => typeof item === 'string')
+
+const isTrustedAuditReviewer = (value: unknown): value is TrustedAuditReviewerContext => {
+  if (!value || typeof value !== 'object') return false
+
+  const reviewer = value as Partial<TrustedAuditReviewerContext>
+
+  return (
+    typeof reviewer.subject === 'string' &&
+    reviewer.subject.length > 0 &&
+    isStringArray(reviewer.roles) &&
+    isStringArray(reviewer.permissions)
+  )
+}
 
 const isTrustedOperator = (value: unknown): value is TrustedOperatorContext => {
   if (!value || typeof value !== 'object') return false
@@ -490,6 +521,32 @@ export const authorizeLot1Operation = (request: Lot1AuthorizationRequest): Autho
   }
 
   return allow('CDCF-2.2', 'RG-00')
+}
+
+/** Global I-Con reconciliation permission for designated Security reviewers. */
+export const authorizeUnlockAuditReconciliation = (
+  reviewer: TrustedAuditReviewerContext | null | undefined
+): AuthorizationDecision => {
+  if (!reviewer) return deny('UNAUTHENTICATED', 'RG-00')
+  if (!isTrustedAuditReviewer(reviewer)) return deny('INVALID_OPERATOR_CONTEXT', 'RG-00')
+
+  const recognizedPortalRoles = getPortalClientRoles(reviewer.roles)
+
+  if (recognizedPortalRoles.length === 0) return deny('PORTAL_ROLE_REQUIRED', 'RG-02')
+
+  if (recognizedPortalRoles.length !== 1) {
+    return deny('SINGLE_PORTAL_ROLE_REQUIRED', 'DEC-AUTH-001', 'RG-00')
+  }
+
+  if (recognizedPortalRoles[0] === 'AUD') {
+    return deny('ACTION_NOT_ALLOWED', 'CDCF-2.2', 'DEC-AUDIT-RECON-001', 'RG-00')
+  }
+
+  if (!reviewer.permissions.includes(AUDIT_ACTIONS.unlockReconcile)) {
+    return deny('PERMISSION_REQUIRED', 'DEC-AUDIT-RECON-001', 'RG-00', 'RG-42')
+  }
+
+  return allow('DEC-AUDIT-RECON-001', 'DEC-AUTH-001', 'RG-00', 'RG-42')
 }
 
 /** Exact, server-side, default-deny Lot 1 authorization policy (CDCF RG-00). */

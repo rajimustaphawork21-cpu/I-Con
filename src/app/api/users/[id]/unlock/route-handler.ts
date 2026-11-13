@@ -1,9 +1,11 @@
 import 'server-only'
 
 // Auth Imports
-import type { TrustedOperatorContext } from '@/libs/auth/authorization-policy'
+import { LOT1_ACTIONS, authorizeLot1, authorizeLot1Operation } from '@/libs/auth/authorization-policy'
+import type { TrustedOperatorContext, TrustedUserProtectionFacts } from '@/libs/auth/authorization-policy'
 
 // User Imports
+import type { ResolvedUserProtection, UserIdentity } from '@/modules/users/application/get-user-detail.usecase'
 import { AccountVisibilityScopeUnavailableError } from '@/modules/users/application/list-users.usecase'
 import type { ResolvedAccountVisibilityScope } from '@/modules/users/application/list-users.usecase'
 import {
@@ -28,6 +30,34 @@ type UserUnlockRouteContext = {
   params: Promise<{ id: string }>
 }
 
+export type LocalDevelopmentUnlockConfiguration =
+  | { enabled: false }
+  | {
+      enabled: true
+      accountId: string
+    }
+
+export type UserUnlockStatusDto = {
+  enabled: boolean
+  eligible: boolean
+  locked: boolean | null
+}
+
+type UserUnlockGetRouteDependencies = {
+  getSession: () => Promise<ServerSession | null>
+  resolveVisibilityScope: (
+    operator: TrustedOperatorContext
+  ) =>
+    | Promise<ResolvedAccountVisibilityScope<KeycloakAccountVisibilityScope> | null>
+    | ResolvedAccountVisibilityScope<KeycloakAccountVisibilityScope>
+    | null
+  isAccountIdInScope: (scope: KeycloakAccountVisibilityScope, accountId: string) => boolean | null
+  getUserById: (accountId: string) => Promise<UserIdentity | null>
+  resolveProtection: (user: UserIdentity) => Promise<ResolvedUserProtection | null>
+  isLocked: (accountId: string) => Promise<boolean>
+  readConfiguration?: () => LocalDevelopmentUnlockConfiguration
+}
+
 type UserUnlockRouteDependencies = {
   getSession: () => Promise<ServerSession | null>
   resolveVisibilityScope: (
@@ -50,11 +80,17 @@ const NO_STORE_HEADERS = {
   pragma: 'no-cache'
 }
 
-const json = (body: unknown, status: number, correlationId: string) =>
+const json = (body: unknown, status: number, correlationId?: string) =>
   Response.json(body, {
     status,
-    headers: { ...NO_STORE_HEADERS, 'x-correlation-id': correlationId }
+    headers: correlationId ? { ...NO_STORE_HEADERS, 'x-correlation-id': correlationId } : NO_STORE_HEADERS
   })
+
+const unlockStatus = (enabled: boolean, eligible = false, locked: boolean | null = null): UserUnlockStatusDto => ({
+  enabled,
+  eligible,
+  locked
+})
 
 const toOperator = (session: ServerSession | null): TrustedOperatorContext | null => {
   const subject = session?.user?.id
@@ -70,6 +106,177 @@ const toOperator = (session: ServerSession | null): TrustedOperatorContext | nul
     modifiableProfileFields: []
   }
 }
+
+const readProtection = (value: ResolvedUserProtection | null): TrustedUserProtectionFacts | null => {
+  const protection = value?.value
+
+  if (
+    value?.resolution !== 'resolved' ||
+    !protection ||
+    typeof protection.hasRealmManagementRole !== 'boolean' ||
+    typeof protection.hasRealmAdministrationRole !== 'boolean' ||
+    typeof protection.isSsoAdministratorsGroupMember !== 'boolean' ||
+    typeof protection.hasProtectedAttribute !== 'boolean' ||
+    typeof protection.isServiceAccount !== 'boolean'
+  ) {
+    return null
+  }
+
+  return protection
+}
+
+export const readLocalDevelopmentUnlockConfiguration = (
+  environment: NodeJS.ProcessEnv = process.env
+): LocalDevelopmentUnlockConfiguration => {
+  if (environment.NODE_ENV !== 'development') return { enabled: false }
+  if (environment.ICON_DEV_LIVE_UNLOCK_ENABLED !== 'true') return { enabled: false }
+
+  const accountId = environment.ICON_DEV_LIVE_UNLOCK_ACCOUNT_ID?.trim()
+  const adminUrl = environment.ICON_KEYCLOAK_ADMIN_URL?.trim()
+  const realm = environment.ICON_KEYCLOAK_REALM?.trim()
+  const unlockClientId = environment.ICON_KEYCLOAK_USER_UNLOCK_CLIENT_ID?.trim()
+  const unlockClientSecret = environment.ICON_KEYCLOAK_USER_UNLOCK_CLIENT_SECRET?.trim()
+  const directoryClientId = environment.ICON_KEYCLOAK_DIRECTORY_CLIENT_ID?.trim()
+
+  if (
+    !accountId ||
+    !/^[A-Za-z0-9_-]{1,128}$/.test(accountId) ||
+    !adminUrl ||
+    realm !== 'I-Con' ||
+    !unlockClientId ||
+    !unlockClientSecret ||
+    unlockClientId === directoryClientId
+  ) {
+    return { enabled: false }
+  }
+
+  try {
+    if (!['localhost', '127.0.0.1', '[::1]'].includes(new URL(adminUrl).hostname)) {
+      return { enabled: false }
+    }
+  } catch {
+    return { enabled: false }
+  }
+
+  return {
+    enabled: true,
+    accountId
+  }
+}
+
+export const createUserUnlockGetHandler =
+  (dependencies: UserUnlockGetRouteDependencies) => async (_request: Request, context: UserUnlockRouteContext) => {
+    const configuration = dependencies.readConfiguration?.() ?? readLocalDevelopmentUnlockConfiguration()
+
+    if (!configuration.enabled) return json(unlockStatus(false), 200)
+
+    let session: ServerSession | null
+
+    try {
+      session = await dependencies.getSession()
+    } catch {
+      return json({ error: 'AUTHENTICATION_UNAVAILABLE' }, 500)
+    }
+
+    if (!session) return json({ error: 'UNAUTHENTICATED' }, 401)
+
+    const operator = toOperator(session)
+
+    if (!operator) return json({ error: 'UNAUTHENTICATED' }, 401)
+
+    const operationDecision = authorizeLot1Operation({
+      operator,
+      action: LOT1_ACTIONS.userUnlock
+    })
+
+    if (!operationDecision.allowed) return json(unlockStatus(true), 200)
+
+    let accountId: string
+
+    try {
+      accountId = (await context.params).id
+    } catch {
+      return json(unlockStatus(false), 200)
+    }
+
+    if (accountId !== configuration.accountId || !/^[A-Za-z0-9_-]{1,128}$/.test(accountId)) {
+      return json(unlockStatus(false), 200)
+    }
+
+    let visibilityScope: ResolvedAccountVisibilityScope<KeycloakAccountVisibilityScope> | null
+
+    try {
+      visibilityScope = await dependencies.resolveVisibilityScope(operator)
+    } catch {
+      visibilityScope = null
+    }
+
+    if (!visibilityScope || visibilityScope.resolution !== 'approved') return json(unlockStatus(true), 200)
+
+    const inScope = dependencies.isAccountIdInScope(visibilityScope.value, accountId)
+
+    if (inScope !== true) return json(unlockStatus(true), 200)
+
+    let user: UserIdentity | null
+
+    try {
+      user = await dependencies.getUserById(accountId)
+    } catch {
+      return json(unlockStatus(true), 200)
+    }
+
+    if (!user || user.id !== accountId) return json(unlockStatus(true), 200)
+
+    let resolvedProtection: ResolvedUserProtection | null
+
+    try {
+      resolvedProtection = await dependencies.resolveProtection(user)
+    } catch {
+      resolvedProtection = null
+    }
+
+    const protection = readProtection(resolvedProtection)
+
+    if (!protection) return json(unlockStatus(true), 200)
+
+    const targetDecision = authorizeLot1({
+      operator,
+      action: LOT1_ACTIONS.userUnlock,
+      target: {
+        user: {
+          id: user.id,
+          username: user.username,
+          isLocked: true,
+          protection
+        }
+      }
+    })
+
+    if (!targetDecision.allowed) return json(unlockStatus(true), 200)
+
+    let isLocked: boolean
+
+    try {
+      isLocked = await dependencies.isLocked(user.id)
+    } catch {
+      return json(unlockStatus(true), 200)
+    }
+
+    const authorization = authorizeLot1({
+      operator,
+      action: LOT1_ACTIONS.userUnlock,
+      target: {
+        user: {
+          id: user.id,
+          username: user.username,
+          isLocked,
+          protection
+        }
+      }
+    })
+
+    return json(unlockStatus(true, authorization.allowed, isLocked), 200)
+  }
 
 const readRequest = async (request: Request): Promise<UnlockUserRequest> => {
   try {

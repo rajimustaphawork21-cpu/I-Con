@@ -4,13 +4,14 @@ import type { DefaultSession } from 'next-auth'
 import Keycloak from 'next-auth/providers/keycloak'
 
 // Lib Imports
-import { PORTAL_CLIENT_ID, getPortalClientRoles, hasPortalAccess } from '@/libs/auth/claims'
+import { PORTAL_CLIENT_ID, getIconClientPermissions, getPortalClientRoles, hasPortalAccess } from '@/libs/auth/claims'
 import { captureLogoutIdToken } from '@/libs/auth/logout-context'
 import { extractClientRoles } from '@/libs/auth/realm-roles'
 
 declare module 'next-auth' {
   interface Session {
     clientRoles: string[] // Validated Keycloak client roles; provider tokens are never exposed on Session.
+    clientPermissions: string[] // Separately allowlisted icon-bff business permissions.
     user: { id: string; givenName?: string | null } & DefaultSession['user']
   }
 }
@@ -19,6 +20,7 @@ declare module '@auth/core/jwt' {
   interface JWT {
     idToken?: string
     clientRoles?: string[]
+    clientPermissions?: string[]
     givenName?: string
   }
 }
@@ -77,9 +79,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         })
 
         const clientRoles = getPortalClientRoles(claimedRoles)
+        const clientPermissions = getIconClientPermissions(claimedRoles)
 
         token.idToken = typeof account.id_token === 'string' ? account.id_token : undefined
         token.clientRoles = clientRoles
+        token.clientPermissions = clientPermissions
         token.givenName = typeof profile.given_name === 'string' ? profile.given_name : undefined
 
         if (process.env.NODE_ENV === 'development') {
@@ -91,6 +95,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
     session({ session, token }) {
       session.clientRoles = getPortalClientRoles(token.clientRoles)
+      session.clientPermissions = getIconClientPermissions(token.clientPermissions)
       session.user.id = token.sub ?? ''
       session.user.givenName = token.givenName ?? null
 

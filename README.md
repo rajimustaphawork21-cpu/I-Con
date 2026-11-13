@@ -42,6 +42,14 @@ Portal authorization uses the exact Client Roles `OPS-N1`, `ADM-APP`, `AUD`, and
 `resource_access["icon-bff"].roles`. Realm Roles, roles belonging to other Clients, unknown roles, and
 browser-provided values do not grant access. An authenticated user without one of these roles receives 403.
 
+Designated Security reviewers additionally receive the exact `icon-bff` Client Role `audit:unlock:reconcile`.
+It is allowlisted as a separate permission and does not count as a portal profile: DEC-AUTH-001 still requires exactly
+one of the four portal roles. The CDCF/CDCT read-only `AUD` profile is explicitly excluded even when it carries the
+permission, so an eligible reviewer needs one non-AUD portal role. `POST
+/api/audit/unlock-reconciliations/{operationId}` derives the reviewer from the authenticated Keycloak subject, rejects
+client-supplied reviewer identities, and uses the dedicated PostgreSQL reconciler connection. See
+`docs/decisions/DEC-AUDIT-RECON-001-security-reviewers.md`.
+
 The preferred source is the ID token already validated by Auth.js. If that claim is absent, I-Con verifies
 the access-token RS256 signature against the Realm JWKS and validates its issuer, subject, expiry, and
 `azp=icon-bff` before reading the same Client Role claim. The subject must match the validated ID token.
@@ -130,10 +138,10 @@ server-side Auth.js session, checks the trusted account scope before loading the
 Keycloak, resolves RG-37 without the development read override, reads the current per-user brute-force status, and
 then reapplies the complete Lot 1 policy. It never changes `enabled`, passwords, or Realm brute-force settings.
 
-Live unlock is intentionally disabled: the repository has no durable append-only audit store or coordinator capable
-of satisfying RG-46 and RG-47 across the Keycloak mutation. Until that dependency exists, the production route
-returns `USER_UNLOCK_AUDIT_UNAVAILABLE` before constructing the write adapter or reading the target. Tests use an
-in-memory coordinator only as a test double; it is not a production audit implementation.
+Live unlock remains intentionally disabled. The repository now contains PostgreSQL append-only migrations and a
+`PostgresUserUnlockAuditCoordinator`, but the production route deliberately does not inject that coordinator yet.
+It therefore returns `USER_UNLOCK_AUDIT_UNAVAILABLE` before constructing the write adapter or reading the target.
+See `docs/audit/local-postgresql.md` for local setup, verification, and the remaining RG-46/TS-20 gates.
 
 After the durable audit design is approved and implemented, provision a separate confidential service-account
 client such as `icon-user-unlocker`. Do not add write roles to `icon-directory-reader`. The server-only write adapter
@@ -143,6 +151,24 @@ for the target. The narrowest supported grant is therefore a Fine-Grained Admin 
 restricted to the explicitly approved target population and a policy matching the write service account. Do not
 grant `realm-admin`; avoid the coarse `realm-management/manage-users` role unless IAM explicitly accepts its broader
 access after testing proves the fine-grained grant cannot support the endpoint.
+
+### Local PostgreSQL audit database
+
+The local setup uses the native PostgreSQL instance at `127.0.0.1:5432`, without Docker. It creates separate
+`icon_audit` and `icon_audit_test` databases, a no-login object owner, and a restricted application runtime role.
+The runtime role can read records and execute the normal controlled audit functions, but cannot append manual
+reconciliations or directly insert, update, delete, or truncate records. A separate restricted reconciler role can
+execute only the controlled reconciliation append function.
+
+Migration 004 also requires a reviewer other than the operator on the original unlock ATTEMPT. This separation is
+enforced by PostgreSQL for both the authenticated server route and the local operations CLI.
+
+Run `pnpm db:audit:setup-local` and follow the local terminal prompts. The script applies
+the versioned migrations under `database/migrations`, updates the gitignored `.env.local` without printing passwords,
+verifies the `icon_dev` TCP login, and runs the PostgreSQL integration test. The application reads only these server-side
+variables: `ICON_AUDIT_DB_HOST`, `ICON_AUDIT_DB_PORT`, `ICON_AUDIT_DB_NAME`, `ICON_AUDIT_DB_USER`,
+`ICON_AUDIT_DB_PASSWORD`, `ICON_AUDIT_DB_SSL_MODE`, `ICON_AUDIT_RECONCILER_DB_USER`, and
+`ICON_AUDIT_RECONCILER_DB_PASSWORD`. Integration tests additionally read `ICON_AUDIT_TEST_DB_NAME`.
 
 ### Local simulated unlock UI
 

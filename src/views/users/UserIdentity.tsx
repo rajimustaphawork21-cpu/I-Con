@@ -32,18 +32,15 @@ import CustomTabList from '@core/components/mui/TabList'
 
 // User Imports
 import {
-  INITIAL_SIMULATED_UNLOCK_STATE,
+  INITIAL_USER_UNLOCK_STATE,
   buildUserDetailRequestUrl,
+  executeUserUnlock,
   getUserDetailErrorKind,
-  loadSimulatedUnlockCapability,
-  reduceSimulatedUnlockUiState,
-  parseUserIdentity
+  loadUserUnlockStatus,
+  parseUserIdentity,
+  reduceUserUnlockUiState
 } from '@/modules/users/presentation/user-detail'
-import type {
-  SimulatedUnlockCapabilityDto,
-  UserDetailErrorKind,
-  UserIdentityDto
-} from '@/modules/users/presentation/user-detail'
+import type { UserDetailErrorKind, UserIdentityDto } from '@/modules/users/presentation/user-detail'
 
 type UserIdentityProps = {
   userId: string
@@ -97,13 +94,9 @@ const UserIdentity = ({ userId }: UserIdentityProps) => {
   const [errorKind, setErrorKind] = useState<UserDetailErrorKind | null>(null)
   const [retry, setRetry] = useState(0)
   const [activeTab, setActiveTab] = useState<'identity' | 'security'>('identity')
-  const [demoCapability, setDemoCapability] = useState<SimulatedUnlockCapabilityDto | null>(null)
-  const [demoLoading, setDemoLoading] = useState(false)
+  const [unlockLoading, setUnlockLoading] = useState(false)
 
-  const [simulatedUnlock, dispatchSimulatedUnlock] = useReducer(
-    reduceSimulatedUnlockUiState,
-    INITIAL_SIMULATED_UNLOCK_STATE
-  )
+  const [unlockUi, dispatchUnlock] = useReducer(reduceUserUnlockUiState, INITIAL_USER_UNLOCK_STATE)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -152,31 +145,67 @@ const UserIdentity = ({ userId }: UserIdentityProps) => {
 
   useEffect(() => {
     if (!user) {
-      setDemoCapability(null)
-      setDemoLoading(false)
+      dispatchUnlock({ type: 'reset', status: null })
+      setUnlockLoading(false)
 
       return
     }
 
     const controller = new AbortController()
 
-    const loadCapability = async () => {
-      setDemoLoading(true)
-      setDemoCapability(null)
+    const loadStatus = async () => {
+      setUnlockLoading(true)
+      dispatchUnlock({ type: 'reset', status: null })
 
-      const capability = await loadSimulatedUnlockCapability(user.id, fetch, controller.signal)
+      const status = await loadUserUnlockStatus(user.id, fetch, controller.signal)
 
       if (controller.signal.aborted) return
 
-      setDemoCapability(capability)
-      dispatchSimulatedUnlock({ type: 'reset', locked: capability?.simulatedLocked === true })
-      setDemoLoading(false)
+      dispatchUnlock({ type: 'reset', status })
+      setUnlockLoading(false)
     }
 
-    void loadCapability()
+    void loadStatus()
 
     return () => controller.abort()
   }, [user])
+
+  const handleConfirmUnlock = async () => {
+    if (
+      !user ||
+      unlockUi.submitting ||
+      !unlockUi.enabled ||
+      !unlockUi.eligible ||
+      unlockUi.locked !== true ||
+      unlockUi.unknownCorrelationId
+    ) {
+      return
+    }
+
+    dispatchUnlock({ type: 'submit-start' })
+
+    const result = await executeUserUnlock(user.id, fetch)
+
+    if (result.outcome === 'unlocked') {
+      dispatchUnlock({ type: 'submit-success' })
+
+      return
+    }
+
+    if (result.outcome === 'unknown') {
+      dispatchUnlock({ type: 'submit-unknown', correlationId: result.correlationId })
+
+      return
+    }
+
+    if (result.outcome === 'not-locked') {
+      dispatchUnlock({ type: 'submit-not-locked', message: result.message })
+
+      return
+    }
+
+    dispatchUnlock({ type: 'submit-error', message: result.message })
+  }
 
   const errorContent = errorKind ? ERROR_CONTENT[errorKind] : null
 
@@ -287,60 +316,83 @@ const UserIdentity = ({ userId }: UserIdentityProps) => {
                     <div>
                       <Typography variant='h5'>Sécurité du compte</Typography>
                       <Typography color='text.secondary' className='mbs-1'>
-                        Démonstration locale du parcours de déblocage.
+                        État de verrouillage anti-force brute Keycloak et déblocage contrôlé.
                       </Typography>
                     </div>
-                    <Chip variant='tonal' color='info' label='Simulation locale' />
                   </Box>
 
-                  <Alert severity='info'>
-                    Aucun appel d’écriture n’est envoyé à Keycloak. L’état affiché dans cet onglet est simulé et
-                    distinct de l’état de verrouillage réel du compte.
-                  </Alert>
-
-                  {demoLoading ? (
+                  {unlockLoading ? (
                     <Box className='flex items-center gap-3' role='status'>
                       <CircularProgress size={24} />
-                      <Typography color='text.secondary'>Vérification de l’éligibilité de la simulation…</Typography>
+                      <Typography color='text.secondary'>
+                        Vérification de l’état de verrouillage Keycloak…
+                      </Typography>
                     </Box>
                   ) : null}
 
-                  {!demoLoading && demoCapability?.enabled && demoCapability.eligible ? (
+                  {!unlockLoading && unlockUi.enabled && unlockUi.locked !== null ? (
                     <Box className='flex flex-col gap-4 rounded border border-solid p-5' sx={{ borderColor: 'divider' }}>
                       <Box className='flex flex-wrap items-center justify-between gap-3'>
                         <div>
-                          <Typography className='font-medium'>État de verrouillage simulé</Typography>
+                          <Typography className='font-medium'>État de verrouillage Keycloak</Typography>
                           <Typography variant='body2' color='text.secondary'>
-                            Compte de démonstration uniquement
+                            {unlockUi.unknownCorrelationId
+                              ? 'Le résultat de la dernière demande de déblocage est incertain.'
+                              : unlockUi.locked
+                                ? 'Ce compte est temporairement verrouillé par la protection anti-force brute.'
+                                : 'Aucun verrouillage anti-force brute actif sur ce compte.'}
                           </Typography>
                         </div>
                         <Chip
                           variant='tonal'
-                          color={simulatedUnlock.locked ? 'warning' : 'success'}
-                          label={simulatedUnlock.locked ? 'Verrouillé (simulation)' : 'Débloqué (simulation)'}
+                          color={
+                            unlockUi.unknownCorrelationId
+                              ? 'error'
+                              : unlockUi.locked
+                                ? 'warning'
+                                : 'success'
+                          }
+                          label={
+                            unlockUi.unknownCorrelationId
+                              ? 'État incertain (UNKNOWN)'
+                              : unlockUi.locked
+                                ? 'Verrouillé'
+                                : 'Non verrouillé'
+                          }
                         />
                       </Box>
 
-                      {simulatedUnlock.feedback ? <Alert severity='success'>{simulatedUnlock.feedback}</Alert> : null}
+                      {unlockUi.feedback ? <Alert severity='success'>{unlockUi.feedback}</Alert> : null}
 
-                      {simulatedUnlock.locked ? (
+                      {unlockUi.unknownCorrelationId ? (
+                        <Alert severity='error'>
+                          Résultat du déblocage incertain (UNKNOWN). Identifiant de corrélation :{' '}
+                          <strong>{unlockUi.unknownCorrelationId}</strong>. Ne relancez pas l’opération avant
+                          réconciliation.
+                        </Alert>
+                      ) : null}
+
+                      {unlockUi.error ? <Alert severity='error'>{unlockUi.error}</Alert> : null}
+
+                      {unlockUi.eligible && unlockUi.locked && !unlockUi.unknownCorrelationId ? (
                         <Box>
                           <Button
                             variant='contained'
                             color='warning'
+                            disabled={unlockUi.submitting}
                             startIcon={<i className='tabler-lock-open' aria-hidden='true' />}
-                            onClick={() => dispatchSimulatedUnlock({ type: 'open-confirmation' })}
+                            onClick={() => dispatchUnlock({ type: 'open-confirmation' })}
                           >
-                            Débloquer (simulation)
+                            Débloquer
                           </Button>
                         </Box>
                       ) : null}
                     </Box>
                   ) : null}
 
-                  {!demoLoading && (!demoCapability?.enabled || !demoCapability.eligible) ? (
+                  {!unlockLoading && (!unlockUi.enabled || unlockUi.locked === null) ? (
                     <Alert severity='warning'>
-                      La démonstration de déblocage n’est pas disponible pour cet opérateur ou ce compte.
+                      Le déblocage du compte n’est pas disponible pour cet opérateur ou ce compte.
                     </Alert>
                   ) : null}
                 </Box>
@@ -351,23 +403,23 @@ const UserIdentity = ({ userId }: UserIdentityProps) => {
       ) : null}
 
       <Dialog
-        open={simulatedUnlock.confirmationOpen}
-        onClose={() => dispatchSimulatedUnlock({ type: 'cancel' })}
-        aria-labelledby='simulated-unlock-dialog-title'
+        open={unlockUi.confirmationOpen}
+        onClose={() => dispatchUnlock({ type: 'cancel' })}
+        aria-labelledby='user-unlock-dialog-title'
       >
-        <DialogTitle id='simulated-unlock-dialog-title'>Confirmer le déblocage simulé</DialogTitle>
+        <DialogTitle id='user-unlock-dialog-title'>Confirmer le déblocage du compte</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Confirmez-vous le déblocage simulé de ce compte ? Cette action modifie uniquement l’état local de la
-            démonstration. Le compte Keycloak reste inchangé.
+            Confirmez-vous le déblocage du compte {user?.username ?? ''} dans Keycloak ? Cette opération supprimera le
+            verrouillage anti-force brute et sera enregistrée dans la piste d’audit PostgreSQL.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button color='secondary' onClick={() => dispatchSimulatedUnlock({ type: 'cancel' })}>
+          <Button color='secondary' disabled={unlockUi.submitting} onClick={() => dispatchUnlock({ type: 'cancel' })}>
             Annuler
           </Button>
-          <Button variant='contained' color='warning' onClick={() => dispatchSimulatedUnlock({ type: 'confirm' })}>
-            Confirmer le déblocage simulé
+          <Button variant='contained' color='warning' disabled={unlockUi.submitting} onClick={handleConfirmUnlock}>
+            Confirmer le déblocage
           </Button>
         </DialogActions>
       </Dialog>

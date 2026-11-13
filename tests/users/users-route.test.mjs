@@ -94,6 +94,19 @@ test('GET /api/users returns an authorized scoped directory page without cacheab
   assert.deepEqual(adapter.calls[0].query, { search: 'ali', page: 1, pageSize: 1, offset: 0 })
 })
 
+test('AUD can still search users inside its authorized scope', async () => {
+  const { adapter, handler } = createTestRoute({
+    currentSession: session(['AUD']),
+    scope: approvedScope(['user-1'])
+  })
+  const response = await handler(new Request('http://localhost/api/users?search=ali&page=1&pageSize=20'))
+  const body = await response.json()
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(body.users.map(user => user.id), ['user-1'])
+  assert.deepEqual(adapter.calls[0].scope, { mode: 'account-ids', accountIds: ['user-1'] })
+})
+
 test('GET /api/users returns 401 for a missing session without resolving scope or calling the adapter', async () => {
   const { adapter, getResolverCalls, handler } = createTestRoute({
     currentSession: null,

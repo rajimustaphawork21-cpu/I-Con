@@ -3,7 +3,8 @@ import test from 'node:test'
 
 import policyModule from '../../src/libs/auth/authorization-policy.ts'
 
-const { LOT1_ACTIONS, LOT1_WRITE_ACTIONS, authorizeLot1 } = policyModule
+const { AUDIT_ACTIONS, LOT1_ACTIONS, LOT1_WRITE_ACTIONS, authorizeLot1, authorizeUnlockAuditReconciliation } =
+  policyModule
 
 const application = {
   id: 'application-uuid',
@@ -69,6 +70,40 @@ const fullTarget = (user = eligibleUser) => ({
   requestedRoleIds: []
 })
 
+const reviewer = (roles = ['ADM-CONSOLE'], permissions = [AUDIT_ACTIONS.unlockReconcile]) => ({
+  subject: 'security-reviewer',
+  roles,
+  permissions
+})
+
+test('a designated Security reviewer with exactly one portal role may reconcile globally', () => {
+  assert.deepEqual(authorizeUnlockAuditReconciliation(reviewer()), {
+    allowed: true,
+    rules: ['DEC-AUDIT-RECON-001', 'DEC-AUTH-001', 'RG-00', 'RG-42']
+  })
+})
+
+test('AUD remains read-only even with the explicit reconciliation permission', () => {
+  assert.deepEqual(authorizeUnlockAuditReconciliation(reviewer(['AUD'])), {
+    allowed: false,
+    reason: 'ACTION_NOT_ALLOWED',
+    rules: ['CDCF-2.2', 'DEC-AUDIT-RECON-001', 'RG-00']
+  })
+})
+
+test('reconciliation denies missing permission and ambiguous portal profiles', () => {
+  assert.deepEqual(authorizeUnlockAuditReconciliation(reviewer(['ADM-CONSOLE'], [])), {
+    allowed: false,
+    reason: 'PERMISSION_REQUIRED',
+    rules: ['DEC-AUDIT-RECON-001', 'RG-00', 'RG-42']
+  })
+  assert.deepEqual(authorizeUnlockAuditReconciliation(reviewer(['AUD', 'ADM-CONSOLE'])), {
+    allowed: false,
+    reason: 'SINGLE_PORTAL_ROLE_REQUIRED',
+    rules: ['DEC-AUTH-001', 'RG-00']
+  })
+})
+
 test('OPS-N1 may unlock an eligible account', () => {
   const decision = authorizeLot1({
     operator: operator(['OPS-N1']),
@@ -94,10 +129,7 @@ test('OPS-N1 may never assign a role', () => {
 })
 
 test('AUD may read authorized user and application data', () => {
-  assert.equal(
-    authorizeLot1({ operator: operator(['AUD']), action: LOT1_ACTIONS.userRead }).allowed,
-    true
-  )
+  assert.equal(authorizeLot1({ operator: operator(['AUD']), action: LOT1_ACTIONS.userRead }).allowed, true)
   assert.equal(
     authorizeLot1({
       operator: operator(['AUD']),
@@ -132,6 +164,7 @@ for (const roles of [
       action: LOT1_ACTIONS.applicationRead,
       target: { application }
     })
+
     const writeDecision = authorizeLot1({
       operator: operator(roles),
       action: LOT1_ACTIONS.roleAssign,
@@ -153,10 +186,12 @@ test('business operations require one recognized role while portal admission rem
     operator: operator(['unknown-role']),
     action: LOT1_ACTIONS.userRead
   })
+
   const duplicateSingleRole = authorizeLot1({
     operator: operator(['AUD', 'AUD']),
     action: LOT1_ACTIONS.userRead
   })
+
   const multipleRolePortalAccess = authorizeLot1({
     operator: operator(['AUD', 'ADM-APP']),
     action: LOT1_ACTIONS.portalAccess
@@ -271,6 +306,7 @@ test('non-delegable, over-sensitive, and effectively escalating roles are denied
 
 test('system applications are denied even when they appear in configured scope', () => {
   const systemApplication = { id: 'system-app-uuid', clientId: 'realm-management' }
+
   const decision = authorizeLot1({
     operator: operator(['ADM-CONSOLE'], { delegatedApplicationIds: [systemApplication.id] }),
     action: LOT1_ACTIONS.applicationRead,

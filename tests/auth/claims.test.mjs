@@ -4,7 +4,9 @@ import test from 'node:test'
 import claims from '../../src/libs/auth/claims.ts'
 
 const {
+  ICON_CLIENT_PERMISSIONS,
   PORTAL_CLIENT_ROLES,
+  getIconClientPermissions,
   getPortalClientRoles,
   getProfileLabel,
   hasAnyClientRole,
@@ -66,6 +68,13 @@ test('unknown, missing, and case-mismatched roles deny portal access', () => {
 test('retains only allowlisted Client Roles for the Auth.js session', () => {
   assert.deepEqual(getPortalClientRoles(['unknown', 'AUD', 'OPS-N1']), ['OPS-N1', 'AUD'])
   assert.deepEqual(getPortalClientRoles(undefined), [])
+})
+
+test('retains the exact reconciliation permission separately from portal roles', () => {
+  assert.deepEqual(getIconClientPermissions(['AUD', 'audit:unlock:reconcile', 'audit:unlock:reconcile:admin']), [
+    'audit:unlock:reconcile'
+  ])
+  assert.deepEqual(getPortalClientRoles(ICON_CLIENT_PERMISSIONS), [])
 })
 
 test('role-specific checks require an exact role from a non-empty policy', () => {

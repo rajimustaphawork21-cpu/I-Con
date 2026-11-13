@@ -2,8 +2,10 @@
 
 export const PORTAL_CLIENT_ID = 'icon-bff'
 export const PORTAL_CLIENT_ROLES = ['OPS-N1', 'ADM-APP', 'AUD', 'ADM-CONSOLE'] as const
+export const ICON_CLIENT_PERMISSIONS = ['audit:unlock:reconcile'] as const
 
 export type PortalClientRole = (typeof PORTAL_CLIENT_ROLES)[number]
+export type IconClientPermission = (typeof ICON_CLIENT_PERMISSIONS)[number]
 
 const PROFILE_LABELS: Readonly<Record<PortalClientRole, string>> = {
   'OPS-N1': 'OPS-N1 — Support',
@@ -50,6 +52,9 @@ export const hasPortalAccess = (roles: readonly string[] | null | undefined): bo
 export const getPortalClientRoles = (roles: readonly string[] | null | undefined): PortalClientRole[] =>
   PORTAL_CLIENT_ROLES.filter(role => hasClientRole(roles, role))
 
+export const getIconClientPermissions = (roles: readonly string[] | null | undefined): IconClientPermission[] =>
+  ICON_CLIENT_PERMISSIONS.filter(permission => hasClientRole(roles, permission))
+
 export const getProfileLabel = (roles: readonly string[] | null | undefined): string | null => {
   const role = PORTAL_CLIENT_ROLES.find(known => hasClientRole(roles, known))
 
@@ -59,4 +64,3 @@ export const getProfileLabel = (roles: readonly string[] | null | undefined): st
 // First name from the authenticated identity: `given_name` claim, otherwise first word of `name`.
 export const getFirstName = (user: { givenName?: string | null; name?: string | null } | null | undefined) =>
   user?.givenName?.trim() || user?.name?.trim().split(/\s+/)[0] || null
-

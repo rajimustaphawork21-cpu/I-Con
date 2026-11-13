@@ -39,7 +39,7 @@ export interface UserUnlocker {
   unlock(accountId: string): Promise<void>
 }
 
-type UserUnlockAuditBase = {
+export type UserUnlockAuditBase = {
   correlationId: string
   operatorSubject: string | null
   targetUserId?: string
